@@ -1,5 +1,6 @@
 #ifndef STRUCT_TYPE_H
 #define STRUCT_TYPE_H
+#pragma once
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
@@ -68,6 +69,7 @@ struct BBox
     cv::Mat orinImage;
     cv::Mat resizeImage;
     cv::cuda::GpuMat gpuInputImage;
+    size_t batch;
     cv::Size modelInsize;
     std::vector<cv::Rect> rect;
     std::vector<int> indices;

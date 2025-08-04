@@ -52,7 +52,7 @@ namespace fmt
         auto format(const cv::Size_<int> &s, FormatContext &ctx) const
         {
             // 以 "(width, height)" 形式輸出
-            return format_to(ctx.out(), "(width:{}, height:{})", s.width, s.height);
+            return fmt::format_to(ctx.out(), "(width:{}, height:{})", s.width, s.height);
         }
     };
 
@@ -72,7 +72,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(const cv::Rect_<int> &r, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), "(x:{}, y:{}, width:{}, height:{})", r.x, r.y, r.width, r.height);
+            return fmt::format_to(ctx.out(), "(x:{}, y:{}, width:{}, height:{})", r.x, r.y, r.width, r.height);
         }
     };
     // custom formatter by opencv cv::Rect_<float>
@@ -91,7 +91,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(const cv::Rect_<float> &r, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), "(x:{:.3f}, y:{:.3f}, width:{:.3f}, height:{:.3f})", r.x, r.y, r.width, r.height);
+            return fmt::format_to(ctx.out(), "(x:{:.3f}, y:{:.3f}, width:{:.3f}, height:{:.3f})", r.x, r.y, r.width, r.height);
         }
     };
 
@@ -111,7 +111,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(const cv::Point3f &r, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), "(x:{:.4f}, y:{:.4f}, z:{:.4f})", r.x, r.y, r.z);
+            return fmt::format_to(ctx.out(), "(x:{:.4f}, y:{:.4f}, z:{:.4f})", r.x, r.y, r.z);
         }
     };
 
@@ -131,7 +131,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(const cv::Point2i &r, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), "(x:{}, y:{})", r.x, r.y);
+            return fmt::format_to(ctx.out(), "(x:{}, y:{})", r.x, r.y);
         }
     };
 
@@ -151,7 +151,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(const std::filesystem::path &r, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), r.string());
+            return fmt::format_to(ctx.out(), r.string());
         }
     };
     // custom formatter by size_t
@@ -170,7 +170,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(const size_t &r, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), "(size:{})", r);
+            return fmt::format_to(ctx.out(), "(size:{})", r);
         }
     };
 
@@ -199,7 +199,7 @@ namespace fmt
                 }
             }
             dims_str += ")";
-            return format_to(ctx.out(), "{}", dims_str);
+            return fmt::format_to(ctx.out(), "{}", dims_str);
         }
     };
     // custom formatter by nvinfer1::DataType
@@ -211,7 +211,7 @@ namespace fmt
         template <typename FormatContext>
         auto format(nvinfer1::DataType type, FormatContext &ctx) const
         {
-            return format_to(ctx.out(), "{}", dataTypeToStr(type));
+            return fmt::format_to(ctx.out(), "{}", dataTypeToStr(type));
         }
     };
 }

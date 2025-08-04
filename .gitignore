@@ -1,0 +1,6 @@
+.vscode
+build
+bin
+cudatest.cpp
+mainDirty.cpp
+lib

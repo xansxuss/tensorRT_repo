@@ -26,9 +26,9 @@ LogLevel parseLogLevel(std::string &levelStr)
 {
         std::string lowerStr = levelStr;
         // // 將 levelStr 轉成小寫
-        // std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
-        //                [](unsigned char c)
-        //                { return std::tolower(c); });
+        std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
+                       [](unsigned char c)
+                       { return std::tolower(c); });
         if (lowerStr == "trace")
         {
                 return LogLevel::TRACE;
@@ -96,10 +96,9 @@ std::shared_ptr<spdlog::logger> &customLogger::getInstance()
                 const char *env_cstr = std::getenv("CUSTOMS_LEVEL_DEBUG");
                 std::string envString = env_cstr ? env_cstr : "";
 
-                std::cout << "Custom log level set to: " << envString << std::endl;
-
+                // std::cout << "Custom log level set to: " << envString << std::endl;
                 LogLevel customloglevel = parseLogLevel(envString);
-                std::cout << "Parsed custom log level: " << static_cast<int>(customloglevel) << std::endl;
+                // std::cout << "Parsed custom log level: " << static_cast<int>(customloglevel) << std::endl;
                 renameOldlog();
                 // 創建終端輸出（彩色）
                 auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();

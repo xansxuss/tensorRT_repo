@@ -149,7 +149,12 @@ void yoloPreprocessGPU::run(BBox &bbox)
     // cv::imshow("GPU Decoded Frame", cpuMat);
     // customLogger::getInstance()->debug("GPUtoCPUWidth: {}, GPUtoCPUHeight: {}", cpuMat.cols, cpuMat.rows);
     // // cv::imwrite("oringImage2.jpg", cpuMat);
+    auto letters = std::chrono::high_resolution_clock::now();
     letterBoxGPU(bbox);
+    auto lettere = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> letterc = lettere - letters;
+    customLogger::getInstance()->info("letter cost time : {}", letterc.count());
+    customLogger::getInstance()->info("letter FPS : {}", 1 / letterc.count());
 }
 
 void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
@@ -206,8 +211,7 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     customLogger::getInstance()->debug("modelInsize: {},{}", bbox.modelInsize.width, bbox.modelInsize.height);
     customLogger::getInstance()->debug("cuda process scale: {}, tx: {}, ty: {}", scale, tx, ty);
 
-    warpMatrix = (cv::Mat_<float>(2, 3) << scale, 0.0f, tx,
-                  0.0f, scale, ty);
+    warpMatrix = (cv::Mat_<float>(2, 3) << scale, 0.0f, tx, 0.0f, scale, ty);
     // customLogger::getInstance()->debug("cuda process warpMatrix: {},{},{},{},{},{}", warpMatrix.at<float>(0, 0), warpMatrix.at<float>(0, 1), warpMatrix.at<float>(0, 2),
     //                                    warpMatrix.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix.at<float>(1, 2));
     // customLogger::getInstance()->debug("cuda process scale: {}, tx: {}, ty: {}", scale, tx, ty);
@@ -215,9 +219,11 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     // cv::Mat warpMatrix_inv;
     cv::invertAffineTransform(warpMatrix, warpMatrix_inv);
     // 1. 明確地以 modelInsize 計算記憶體
-    const int outW = bbox.modelInsize.width;
-    const int outH = bbox.modelInsize.height;
-    size_t outBytes = static_cast<size_t>(outW * outH * 3 * sizeof(float));
+    const int outN = mBindings.at(0).N;
+    const int outW = mBindings.at(0).W;
+    const int outH = mBindings.at(0).H;
+    const int outC = mBindings.at(0).C;
+    size_t outBytes = static_cast<size_t>(outN * outW * outH * outC * sizeof(float));
     // customLogger::getInstance()->debug("cuda process outW: {}, outH: {}, outBytes: {}", outW, outH, outBytes);
 
     // cudaMalloc(&outputImagePtr, outBytes);

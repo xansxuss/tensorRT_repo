@@ -4,12 +4,16 @@
 #include <numeric>
 #include <cuda_runtime_api.h>
 #include "logger.h"
+#include "setEnv.h"
 #include <algorithm>
 #include <cmath>
 #include "GPU_utils.cuh"
+#include "GPUUtilsBatch.cuh"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+
+infoModel infomodel;
 
 /**
  * @brief Preprocess the input image for YOLO model inference
@@ -30,7 +34,7 @@ void yoloPreprocess::run(BBox &bbox, std::vector<float> &inputTensor)
     letterBox(bbox, inputTensor);
     //     customLogger::getInstance()->debug("originalWidth: {}, originalHeight: {}", bbox.orinImage.cols, bbox.orinImage.rows);
     //     cv::imwrite("oringImage.jpg", bbox.orinImage);
-    cv::imwrite("resizeImage.jpg", bbox.resizeImage);
+    // cv::imwrite("resizeImage.jpg", bbox.resizeImage);
 }
 
 void yoloPreprocess::letterBox(BBox &bbox, std::vector<float> &inputTensor)
@@ -45,9 +49,9 @@ void yoloPreprocess::letterBox(BBox &bbox, std::vector<float> &inputTensor)
         bbox.pad.ratio = 1.0f; // 避免意外的值
         return;
     }
-    bbox.pad.ratio = std::min(static_cast<float>(bbox.modelInsize.width) / static_cast<float>(bbox.orinImage.cols), static_cast<float>(bbox.modelInsize.height) / static_cast<float>(bbox.orinImage.rows));
-    // customLogger::getInstance()->debug("bbox.modelInsize.width / bbox.orinImage.cols: {}", static_cast<float>(bbox.modelInsize.width) / static_cast<float>(bbox.orinImage.cols));
-    // customLogger::getInstance()->debug("bbox.modelInsize.height / bbox.orinImage.rows: {}", static_cast<float>(bbox.modelInsize.height) / static_cast<float>(bbox.orinImage.rows));
+    bbox.pad.ratio = std::min(static_cast<float>(bbox.width) / static_cast<float>(bbox.orinImage.cols), static_cast<float>(bbox.height) / static_cast<float>(bbox.orinImage.rows));
+    // customLogger::getInstance()->debug("bbox.width / bbox.orinImage.cols: {}", static_cast<float>(bbox.width) / static_cast<float>(bbox.orinImage.cols));
+    // customLogger::getInstance()->debug("bbox.height / bbox.orinImage.rows: {}", static_cast<float>(bbox.height) / static_cast<float>(bbox.orinImage.rows));
     // customLogger::getInstance()->debug("pad.ratio: {}", bbox.pad.ratio);
     // 計算新的圖像大小
     cv::Size newSize;
@@ -55,8 +59,8 @@ void yoloPreprocess::letterBox(BBox &bbox, std::vector<float> &inputTensor)
     // customLogger::getInstance()->debug("new size width: {}", static_cast<int>(std::round(bbox.orinImage.cols * bbox.pad.ratio)));
     // customLogger::getInstance()->debug("new size height: {}", static_cast<int>(std::round(bbox.orinImage.rows * bbox.pad.ratio)));
     // customLogger::getInstance()->debug("newSize: {}", newSize);
-    float dw = (static_cast<float>(bbox.modelInsize.width) - (static_cast<float>(newSize.width))) / 2;
-    float dh = (static_cast<float>(bbox.modelInsize.height) - (static_cast<float>(newSize.height))) / 2;
+    float dw = (static_cast<float>(bbox.width) - (static_cast<float>(newSize.width))) / 2;
+    float dh = (static_cast<float>(bbox.height) - (static_cast<float>(newSize.height))) / 2;
     // customLogger::getInstance()->debug("dw: {}, dh: {}", dw, dh);
     cv::Mat resizeImage;
     if (newSize != bbox.orinImage.size())
@@ -76,7 +80,7 @@ void yoloPreprocess::letterBox(BBox &bbox, std::vector<float> &inputTensor)
     bbox.pad.bottom = static_cast<int>(std::ceil(dh));
 
     // customLogger::getInstance()->debug("pad.left: {}, pad.top: {}, pad.right: {}, pad.bottom: {}", pad.left, pad.top, pad.right, pad.bottom);
-    cv::Mat padImage(bbox.modelInsize, CV_8UC3, color);
+    cv::Mat padImage(cv::Size(bbox.width, bbox.height), CV_8UC3, color);
     // cv::copyMakeBorder(resizeImage, padImage, pad.top, pad.bottom, pad.left, pad.right, cv::BORDER_CONSTANT, color);
     resizeImage.copyTo(padImage(cv::Rect(bbox.pad.left, bbox.pad.top, newSize.width, newSize.height)));
     // cv::imwrite("padImage.jpg", padImage);
@@ -90,7 +94,7 @@ void yoloPreprocess::letterBox(BBox &bbox, std::vector<float> &inputTensor)
     int newWidth = newSize.width;
     int newHeight = newSize.height;
     warpMatrix = (cv::Mat_<float>(2, 3) << scale, 0, dw, 0, scale, dh);
-    cv::warpAffine(bbox.orinImage, outputwarp, warpMatrix, bbox.modelInsize, cv::INTER_LINEAR, cv::BORDER_CONSTANT, color);
+    cv::warpAffine(bbox.orinImage, outputwarp, warpMatrix, cv::Size(bbox.width, bbox.height), cv::INTER_LINEAR, cv::BORDER_CONSTANT, color);
     // cv::imwrite("outputwarp.jpg", outputwarp);
 
     // customLogger::getInstance()->debug("padImage size: {}", padImage.size());
@@ -149,20 +153,17 @@ void yoloPreprocessGPU::run(BBox &bbox)
     // cv::imshow("GPU Decoded Frame", cpuMat);
     // customLogger::getInstance()->debug("GPUtoCPUWidth: {}, GPUtoCPUHeight: {}", cpuMat.cols, cpuMat.rows);
     // // cv::imwrite("oringImage2.jpg", cpuMat);
-    auto letters = std::chrono::high_resolution_clock::now();
+    // auto letters = std::chrono::high_resolution_clock::now();
     letterBoxGPU(bbox);
-    auto lettere = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> letterc = lettere - letters;
-    customLogger::getInstance()->info("letter cost time : {}", letterc.count());
-    customLogger::getInstance()->info("letter FPS : {}", 1 / letterc.count());
+    // auto lettere = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double> letterc = lettere - letters;
+    // customLogger::getInstance()->info("letter cost time : {}", letterc.count());
+    // customLogger::getInstance()->info("letter FPS : {}", 1 / letterc.count());
 }
 
 void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
 {
     customLogger::getInstance()->debug("do letterBoxGPU");
-    // 取得原始圖像的大小
-    customLogger::getInstance()->debug("cuda process originalWidth: {}, originalHeight: {}", bbox.gpuInputImage.cols, bbox.gpuInputImage.rows);
-    customLogger::getInstance()->debug("cuda process modelInsizeWidth: {}, modelInsizeHeight: {}", bbox.modelInsize.width, bbox.modelInsize.height);
     // 計算縮放比例
     if (bbox.gpuInputImage.empty() || bbox.gpuInputImage.cols <= 0 || bbox.gpuInputImage.rows <= 0)
     {
@@ -170,54 +171,34 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
         bbox.pad.ratio = 1.0f; // 避免意外的值
         return;
     }
-    // 計算 padding 的大小
-    bbox.pad.ratio = std::min(static_cast<float>(bbox.modelInsize.width) / static_cast<float>(bbox.gpuInputImage.cols), static_cast<float>(bbox.modelInsize.height) / static_cast<float>(bbox.gpuInputImage.rows));
-    // 計算新的圖像大小
-    cv::Size newSize;
-    newSize = cv::Size(static_cast<int>(std::round(bbox.gpuInputImage.cols * bbox.pad.ratio)), static_cast<int>(std::round(bbox.gpuInputImage.rows * bbox.pad.ratio)));
-    customLogger::getInstance()->debug("cuda process newSize: {}, {}", newSize.width, newSize.height);
-    customLogger::getInstance()->debug("cuda process ratio1: {}", static_cast<float>(bbox.modelInsize.width) / static_cast<float>(bbox.gpuInputImage.cols));
-    customLogger::getInstance()->debug("cuda process ratio2: {}", static_cast<float>(bbox.modelInsize.height) / static_cast<float>(bbox.gpuInputImage.rows));
-    customLogger::getInstance()->debug("cuda process dw: {}", (static_cast<float>(bbox.modelInsize.width) - (static_cast<float>(newSize.width))) / 2);
-    customLogger::getInstance()->debug("cuda process dh: {}", (static_cast<float>(bbox.modelInsize.height) - (static_cast<float>(newSize.height))) / 2);
-    customLogger::getInstance()->debug("cuda process pad.ratio: {}", bbox.pad.ratio);
-    float dw = (static_cast<float>(bbox.modelInsize.width) - (static_cast<float>(newSize.width))) / 2;
-    float dh = (static_cast<float>(bbox.modelInsize.height) - (static_cast<float>(newSize.height))) / 2;
-    // cv::cuda::GpuMat resizeImage;
-    // if (newSize != bbox.gpuInputImage.size())
-    // {
-    //     // customLogger::getInstance()->debug("cuda process image size not equal to new_unpad size do image resize images_size : {}, new size : {}", inputImage.size(), pad.pad.newSize);
-    //     cv::cuda::resize(bbox.gpuInputImage, resizeImage, bbox.pad.newSize, cv::INTER_LINEAR);
-    // }
-    // else
-    // {
-    //     // customLogger::getInstance()->debug("cuda process image size equal to new_unpad size do image copy images_size : {}, new sie : {}", inputImage.size(), pad.pad.newSize);
-    //     resizeImage = bbox.gpuInputImage.clone();
-    // }
-    // customLogger::getInstance()->debug("cuda process pad.ratio: {}", pad.ratio);
-    bbox.pad.left = static_cast<int>(std::floor(dw));
-    bbox.pad.right = static_cast<int>(std::ceil(dw));
-    bbox.pad.top = static_cast<int>(std::floor(dh));
-    bbox.pad.bottom = static_cast<int>(std::ceil(dh));
-    int srcW = bbox.gpuInputImage.cols;
-    int srcH = bbox.gpuInputImage.rows;
-    int dstW = bbox.modelInsize.width;
-    int dstH = bbox.modelInsize.height;
-    float scale = std::min(dstW / (float)srcW, dstH / (float)srcH);
-    float tx = (dstW - scale * srcW) * 0.5f;
-    float ty = (dstH - scale * srcH) * 0.5f;
+
+    // 計算 scale 的大小
+    float scale = std::min(static_cast<float>(bbox.width) / static_cast<float>(bbox.gpuInputImage.cols), static_cast<float>(bbox.height) / static_cast<float>(bbox.gpuInputImage.rows));
+    bbox.pad.ratio = scale;
+
+    float tx = (static_cast<float>(bbox.width) - (scale * static_cast<float>(bbox.gpuInputImage.cols))) * 0.5f;
+    float ty = (static_cast<float>(bbox.height) - (scale * static_cast<float>(bbox.gpuInputImage.rows))) * 0.5f;
+
+        // 計算 padding 的大小
+    bbox.pad.left = static_cast<int>(std::floor(tx));
+    bbox.pad.right = static_cast<int>(std::ceil(tx));
+    bbox.pad.top = static_cast<int>(std::floor(ty));
+    bbox.pad.bottom = static_cast<int>(std::ceil(ty));
 
     customLogger::getInstance()->debug("inputImage size: {},{}", bbox.gpuInputImage.cols, bbox.gpuInputImage.rows);
-    customLogger::getInstance()->debug("modelInsize: {},{}", bbox.modelInsize.width, bbox.modelInsize.height);
-    customLogger::getInstance()->debug("cuda process scale: {}, tx: {}, ty: {}", scale, tx, ty);
+    customLogger::getInstance()->debug("modelInsize: {},{}", bbox.width, bbox.height);
+    customLogger::getInstance()->debug("cuda process scale: {}, tx: {}, ty: {}", bbox.pad.ratio, tx, ty);
 
-    warpMatrix = (cv::Mat_<float>(2, 3) << scale, 0.0f, tx, 0.0f, scale, ty);
-    // customLogger::getInstance()->debug("cuda process warpMatrix: {},{},{},{},{},{}", warpMatrix.at<float>(0, 0), warpMatrix.at<float>(0, 1), warpMatrix.at<float>(0, 2),
-    //                                    warpMatrix.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix.at<float>(1, 2));
-    // customLogger::getInstance()->debug("cuda process scale: {}, tx: {}, ty: {}", scale, tx, ty);
+    // warpMatrix = (cv::Mat_<float>(2, 3) << scale, 0.0f, tx, 0.0f, scale, ty);
+    warpMatrix = (cv::Mat_<float>(2, 3) << bbox.pad.ratio, 0.0f, tx, 0.0f, bbox.pad.ratio, ty);
+    customLogger::getInstance()->debug("cuda process warpMatrix: {},{},{},{},{},{}", warpMatrix.at<float>(0, 0), warpMatrix.at<float>(0, 1), warpMatrix.at<float>(0, 2),
+                                       warpMatrix.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix.at<float>(1, 2));
 
     // cv::Mat warpMatrix_inv;
     cv::invertAffineTransform(warpMatrix, warpMatrix_inv);
+    customLogger::getInstance()->debug("cuda process warpMatrix_inv: {},{},{},{},{},{}", warpMatrix_inv.at<float>(0, 0), warpMatrix_inv.at<float>(0, 1), warpMatrix_inv.at<float>(0, 2),
+                                       warpMatrix_inv.at<float>(1, 0), warpMatrix_inv.at<float>(1, 1), warpMatrix_inv.at<float>(1, 2));
+
     // 1. 明確地以 modelInsize 計算記憶體
     const int outN = mBindings.at(0).N;
     const int outW = mBindings.at(0).W;
@@ -239,12 +220,8 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     // 3. 處理 warpMatrix 複製
     // float *d_warpMatrix = nullptr;
     // cudaMalloc(&d_warpMatrix, 6 * sizeof(float));
+    // cudaMemcpy(d_warpMatrix, warpMatrix_inv.ptr<float>(), 6 * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_warpMatrix, warpMatrix_inv.ptr<float>(), 6 * sizeof(float), cudaMemcpyHostToDevice);
-
-    // customLogger::getInstance()->debug("cuda process warpMatrix: {},{},{},{},{},{}", warpMatrix.at<float>(0, 0), warpMatrix.at<float>(0, 1), warpMatrix.at<float>(0, 2),
-    //                                    warpMatrix.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix.at<float>(1, 2));
-    // customLogger::getInstance()->debug("cuda process warpMatrix_inv: {},{},{},{},{},{}", warpMatrix_inv.at<float>(0, 0), warpMatrix_inv.at<float>(0, 1), warpMatrix_inv.at<float>(0, 2),
-    //                                    warpMatrix_inv.at<float>(1, 0), warpMatrix_inv.at<float>(1, 1), warpMatrix_inv.at<float>(1, 2));
 
     // 4. 執行 kernel
     // customLogger::getInstance()->debug("cuda process launchWarpAffineKernel");
@@ -262,50 +239,57 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     std::vector<float> cpuBuffer(outW * outH * 3);
     cudaMemcpy(cpuBuffer.data(), hwcImage, outBytes, cudaMemcpyDeviceToHost);
 
-    // // 轉成 Mat
-    // customLogger::getInstance()->debug("pointer(float) convter to Mat");
-    cv::Mat warpImage(outH, outW, CV_32FC3, cpuBuffer.data());
-    cv::Mat warpImageINT;
-    warpImage.convertTo(bbox.resizeImage, CV_8UC3, 255.0);
-    // cv::namedWindow("outputImage", cv::WINDOW_NORMAL);
-    // cv::resizeWindow("outputImage", 640, 640);
-    // cv::imshow("outputImage", outputImage);
-    // cv::waitKey(0);
-    // warpImageINT.copyTo(outputImage);
-    cv::imwrite("cuda_process_outwarp.jpg", bbox.resizeImage);
+    // // // 轉成 Mat
+    // // customLogger::getInstance()->debug("pointer(float) convter to Mat");
+    // if (getImshowFlag("IMSHOW_FLAG"))
+    // {
+    //     cv::Mat warpImage(outH, outW, CV_32FC3, cpuBuffer.data());
+    //     cv::Mat warpImageINT;
+    //     warpImage.convertTo(bbox.resizeImage, CV_8UC3, 255.0);
+    //     cv::namedWindow("outputImage", cv::WINDOW_NORMAL);
+    //     cv::resizeWindow("outputImage", 640, 640);
+    //     cv::imshow("outputImage", warpImage);
+    //     customLogger::getInstance()->debug("outputImage size : {}",warpImage.size());
+    //     // cv::waitKey(0);
+    //     // warpImageINT.copyTo(outputImage);
+    //     // cv::imwrite("cuda_process_outwarp.jpg", bbox.resizeImage);
+    // }
 
     // 將前處理結果指派到tensorRT input pointer
     // customLogger::getInstance()->debug("pointer convter to tensorRT input");
     cudaMemcpy(mBindings[0].device_ptr, outputImagePtr, outBytes, cudaMemcpyDeviceToDevice);
 
-    // 將 CHW 結果從 GPU 複製到 CPU
-    std::vector<float> chwBuffer(outW * outH * 3);
-    cudaMemcpy(chwBuffer.data(), mBindings[0].device_ptr, outW * outH * 3 * sizeof(float), cudaMemcpyDeviceToHost);
+    if (getImshowFlag("IMSHOW_FLAG"))
+    {
+        // 將 CHW 結果從 GPU 複製到 CPU
+        std::vector<float> chwBuffer(outW * outH * 3);
+        cudaMemcpy(chwBuffer.data(), mBindings[0].device_ptr, outW * outH * 3 * sizeof(float), cudaMemcpyDeviceToHost);
 
-    // // 轉成 HWC 格式
-    // std::vector<float> hwcBuffer(outW * outH * 3);
-    // for (int y = 0; y < outH; ++y)
-    // {
-    //     for (int x = 0; x < outW; ++x)
-    //     {
-    //         int hwc_idx = (y * outW + x) * 3;
-    //         int chw_idx = y * outW + x;
-    //         hwcBuffer[hwc_idx + 0] = chwBuffer[chw_idx + 0 * outW * outH]; // R
-    //         hwcBuffer[hwc_idx + 1] = chwBuffer[chw_idx + 1 * outW * outH]; // G
-    //         hwcBuffer[hwc_idx + 2] = chwBuffer[chw_idx + 2 * outW * outH]; // B
-    //     }
-    // }
+        // 轉成 HWC 格式
+        std::vector<float> hwcBuffer(outW * outH * 3);
+        for (int y = 0; y < outH; ++y)
+        {
+            for (int x = 0; x < outW; ++x)
+            {
+                int hwc_idx = (y * outW + x) * 3;
+                int chw_idx = y * outW + x;
+                hwcBuffer[hwc_idx + 0] = chwBuffer[chw_idx + 0 * outW * outH]; // R
+                hwcBuffer[hwc_idx + 1] = chwBuffer[chw_idx + 1 * outW * outH]; // G
+                hwcBuffer[hwc_idx + 2] = chwBuffer[chw_idx + 2 * outW * outH]; // B
+            }
+        }
 
-    // // 轉成 Mat 顯示
-    // cv::Mat hwcwarpImage(outH, outW, CV_32FC3, hwcBuffer.data());
-    // cv::Mat hwcwarpImageINT;
-    // hwcwarpImage.convertTo(hwcwarpImageINT, CV_8UC3, 255.0);
-    // hwcwarpImageINT.copyTo(outputImage);
-    // cv::namedWindow("hwcwarpImageINT", cv::WINDOW_NORMAL);
-    // cv::resizeWindow("hwcwarpImageINT", 640, 640);
-    // cv::imshow("hwcwarpImageINT", hwcwarpImageINT);
-    // cv::waitKey(0);
-    // // cv::imwrite("cuda_process_chw2hwc_debug.jpg", outputImage);
+        // 轉成 Mat 顯示
+        cv::Mat hwcwarpImage(outH, outW, CV_32FC3, hwcBuffer.data());
+        cv::Mat hwcwarpImageINT;
+        hwcwarpImage.convertTo(hwcwarpImageINT, CV_8UC3, 255.0);
+        // hwcwarpImageINT.copyTo(outputImage);
+        cv::cvtColor(hwcwarpImageINT, hwcwarpImageINT, cv::COLOR_RGB2BGR);
+        cv::namedWindow("hwcwarpImageINT", cv::WINDOW_NORMAL);
+        cv::resizeWindow("hwcwarpImageINT", 640, 640);
+        cv::imshow("hwcwarpImageINT", hwcwarpImageINT);
+        // cv::imwrite("cuda_process_chw2hwc_debug.jpg", outputImage);
+    }
     // cudaFree(d_warpMatrix);
     // cudaFree(hwcImage);
 }
@@ -442,10 +426,10 @@ void yoloPostprocess::run(BBox &bbox)
     //     // customLogger::getInstance()->debug("rect :{}", boxes[bbox.indices.at(i)].rect);
     //     // customLogger::getInstance()->debug("class :{}", boxes[bbox.indices.at(i)].classId);
     //     // customLogger::getInstance()->debug("score :{}", boxes[bbox.indices.at(i)].score);
-    //     float x = boxes[bbox.indices.at(i)].x * bbox.modelInsize.width;
-    //     float y = boxes[bbox.indices.at(i)].y * bbox.modelInsize.height;
-    //     float w = boxes[bbox.indices.at(i)].w * bbox.modelInsize.width;
-    //     float h = boxes[bbox.indices.at(i)].h * bbox.modelInsize.height;
+    //     float x = boxes[bbox.indices.at(i)].x * bbox.width;
+    //     float y = boxes[bbox.indices.at(i)].y * bbox.height;
+    //     float w = boxes[bbox.indices.at(i)].w * bbox.width;
+    //     float h = boxes[bbox.indices.at(i)].h * bbox.height;
     //     // customLogger::getInstance()->debug("scale model input size x: {}, y: {}, w: {}, h: {}", x, y, w, h);
     //     cv::Rect rect = cv::Rect(x, y, w, h); // pointBox
     //     cv::rectangle(bbox.resizeImage, rect, cv::Scalar(0, 255, 0), 2);
@@ -551,21 +535,21 @@ void yoloPostprocess::dePadBoxes(BBox &bbox, std::vector<Box> &boxes)
     {
         // customLogger::getInstance()->debug("x:{}, y:{}, w:{}, h:{}", boxes[bbox.indices.at(i)].x, boxes[bbox.indices.at(i)].y, boxes[bbox.indices.at(i)].w, boxes[bbox.indices.at(i)].h);
         // 還原邊界框的坐標
-        float x = boxes[bbox.indices.at(i)].x * bbox.modelInsize.width;
-        float y = boxes[bbox.indices.at(i)].y * bbox.modelInsize.height;
-        float w = boxes[bbox.indices.at(i)].w * bbox.modelInsize.width;
-        float h = boxes[bbox.indices.at(i)].h * bbox.modelInsize.height;
+        float x = boxes[bbox.indices.at(i)].x * bbox.width;
+        float y = boxes[bbox.indices.at(i)].y * bbox.height;
+        float w = boxes[bbox.indices.at(i)].w * bbox.width;
+        float h = boxes[bbox.indices.at(i)].h * bbox.height;
         customLogger::getInstance()->debug("scale model input size x: {}, y: {}, w: {}, h: {}", x, y, w, h);
         // 反向填充邊界框
-        x = std::clamp(x - bbox.pad.left, 0.0f, static_cast<float>(bbox.modelInsize.width));
-        y = std::clamp(y - bbox.pad.top, 0.0f, static_cast<float>(bbox.modelInsize.height));
-        w = std::clamp(w, 0.0f, static_cast<float>(bbox.modelInsize.width));
-        h = std::clamp(h, 0.0f, static_cast<float>(bbox.modelInsize.height));
+        x = std::clamp(x - bbox.pad.left, 0.0f, static_cast<float>(bbox.width));
+        y = std::clamp(y - bbox.pad.top, 0.0f, static_cast<float>(bbox.height));
+        w = std::clamp(w, 0.0f, static_cast<float>(bbox.width));
+        h = std::clamp(h, 0.0f, static_cast<float>(bbox.height));
         // customLogger::getInstance()->debug("unpad  input size x: {}, y: {}, w: {}, h: {}", x, y, w, h);
         // customLogger::getInstance()->debug("bbox pad left:{}, top:{}", bbox.pad.left, bbox.pad.top);
         // // 縮放回原圖片尺寸
-        float scaleWidth = static_cast<float>(bbox.orinImage.cols) / static_cast<float>(bbox.modelInsize.width);
-        float scaleHeight = static_cast<float>(bbox.orinImage.rows) / static_cast<float>(bbox.modelInsize.height);
+        float scaleWidth = static_cast<float>(bbox.orinImage.cols) / static_cast<float>(bbox.width);
+        float scaleHeight = static_cast<float>(bbox.orinImage.rows) / static_cast<float>(bbox.height);
         // customLogger::getInstance()->debug("scaleWidth: {}, scaleHeight: {}", scaleWidth, scaleHeight);
 
         // float scaleX = x * scaleWidth;
@@ -647,7 +631,7 @@ void yoloPostprocessGPU::run(BBox &bbox, Pad &pad)
 
     launchNMSKernel(d_boxes, mBindings[1].H, bbox.cfg.iouThreshold);
 
-    launchUnscale(d_boxes, mBindings[1].H, pad.left, pad.top, bbox.modelInsize.width, bbox.modelInsize.height, bbox.orinImage.cols, bbox.orinImage.rows);
+    launchUnscale(d_boxes, mBindings[1].H, pad.left, pad.top, bbox.width, bbox.height, bbox.orinImage.cols, bbox.orinImage.rows);
 
     // debug decodeboxes
     Box *host_boxes = new Box[mBindings[1].H];

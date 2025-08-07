@@ -37,7 +37,7 @@ struct configStruct
     std::string enginePath = "./model/yolov8n.engine";
     std::string imagePath = "./media/input/000000005060.jpg";
     std::string savePath = "./media/output";
-    std::unordered_map<int,std::string> classNames;
+    std::unordered_map<int, std::string> classNames;
     std::string outputFolder = "";
 };
 extern configStruct configstruct;
@@ -64,13 +64,23 @@ struct Box
     int keep = 0; // 用於 NMS 過程中標記是否保留此框
 };
 
+struct Inferresult
+{
+    std::vector<cv::Rect> rects;
+    std::vector<float> scores;
+    std::vector<int>classes;
+};
+
+
 struct BBox
 {
     cv::Mat orinImage;
     cv::Mat resizeImage;
     cv::cuda::GpuMat gpuInputImage;
-    size_t batch;
-    cv::Size modelInsize;
+    int batch;
+    int width;
+    int height;
+    int channel;
     std::vector<cv::Rect> rect;
     std::vector<int> indices;
     std::vector<int> classId;
@@ -79,6 +89,21 @@ struct BBox
     yolocfg cfg;
 };
 extern std::vector<BBox> Bboxes;
+
+struct BBoxBatch
+{
+    std::vector<cv::Mat> orinImage;
+    std::vector<cv::Mat> resizeImage;
+    std::vector<cv::cuda::GpuMat> gpuImage;
+    int batch;
+    int width;
+    int height;
+    int channel;
+    Pad pad;
+    yolocfg cfg;
+    Inferresult inferresult; 
+};
+extern std::vector<BBoxBatch> BBoxBatches;
 
 struct caltime
 {

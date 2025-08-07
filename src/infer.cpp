@@ -2,6 +2,7 @@
 #include <NvInferRuntime.h>
 #include <cuda_runtime_api.h>
 #include "infer.h"
+#include "setEnv.h"
 // #include "struct_type.h"
 // #include "imageProcess.h"
 
@@ -178,7 +179,7 @@ void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
         //     b.is_input = 1;
         // }
         b.is_input = (mEngine->getTensorIOMode(b.name.c_str()) == nvinfer1::TensorIOMode::kINPUT);
-        
+
         b.dtype = mEngine->getTensorDataType(b.name.c_str());
         b.dims = mEngine->getTensorShape(b.name.c_str());
         b.N = b.dims.d[0];
@@ -214,9 +215,9 @@ void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
             throw std::runtime_error("Unsupported data type.");
         }
         b.size = elem_count * type_size;
-        cudaMalloc(&b.device_ptr, b.size);   // 分配 device memory
+        cudaMalloc(&b.device_ptr, b.size); // 分配 device memory
         // cudaMallocHost(&b.host_ptr, b.size); // 分配 pinned host memory
-        cudaHostAlloc(&b.host_ptr, b.size,cudaHostAllocDefault);
+        cudaHostAlloc(&b.host_ptr, b.size, cudaHostAllocDefault);
         mBindings.push_back(b);
     }
 };
@@ -224,7 +225,10 @@ void baseInfer::baseInference(BBox &Bbox)
 {
     customLogger::getInstance()->debug("do baseInference");
     // customLogger::getInstance()->debug("input image size hight: {}, width: {}", Bbox.orinImage.rows, Bbox.orinImage.cols);
-    Bbox.modelInsize = cv::Size(mBindings[0].W, mBindings[0].H);
+    Bbox.width = mBindings[0].W;
+    Bbox.height = mBindings[0].H;
+    Bbox.batch = mBindings[0].N;
+    Bbox.channel = mBindings[0].C;
     std::vector<float> nchw(mBindings[0].N * mBindings[0].C * mBindings[0].H * mBindings[0].W);
 
     yoloPreprocess preProcess;
@@ -269,20 +273,18 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
     CudaStream stream;
     customLogger::getInstance()->debug("do baseInferenceGPU");
     customLogger::getInstance()->debug("mBindings[0].w:{},mBindings[0].h:{}", mBindings[0].W, mBindings[0].H);
-    Bbox.modelInsize = cv::Size(mBindings[0].W, mBindings[0].H);
-    customLogger::getInstance()->debug("model input size: {}, {}", Bbox.modelInsize.width, Bbox.modelInsize.height);
-    customLogger::getInstance()->debug("yolo preprocess GPU start");
-    // yoloPreprocessGPU preProcessGPU;
-    
-    // auto pros = std::chrono::high_resolution_clock::now();
-    
+    Bbox.width = mBindings[0].W;
+    Bbox.height = mBindings[0].H;
+    Bbox.batch = mBindings[0].N;
+    Bbox.channel = mBindings[0].C;
+
     mPreProcessGPU->run(Bbox);
-    
+
     // auto proe = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> proc = proe - pros;
     // customLogger::getInstance()->info("pro cost time : {}", proc.count());
     // customLogger::getInstance()->info("pro FPS : {}", 1 / proc.count());
-    
+
     customLogger::getInstance()->debug("yolo preprocess GPU end");
 
     // input image from GPU to CPU format cv::Mat
@@ -313,16 +315,16 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
 
     mContext->setTensorAddress(mBindings[0].name.c_str(), mBindings[0].device_ptr);
     mContext->setTensorAddress(mBindings[1].name.c_str(), mBindings[1].device_ptr);
-    
+
     // auto infers = std::chrono::high_resolution_clock::now();
-    
+
     bool ok = mContext->enqueueV3(stream.get());
-    
+
     // auto infere = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> inferc = infere - infers;
     // customLogger::getInstance()->info("infer cost time : {}", inferc.count());
     // customLogger::getInstance()->info("infer FPS : {}", 1 / inferc.count());
-    
+
     if (!ok)
     {
         customLogger::getInstance()->critical("TensorRT enqueueV3 failed");
@@ -336,30 +338,35 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
     // // yoloPostprocessGPU.run(Bbox, Bbox.pad);
     // yoloPostprocess yoloPostprocess;
     // mPostProcess->run(Bbox, Bbox.pad);
-    
+
     // auto posts = std::chrono::high_resolution_clock::now();
-    
+
     mPostProcessGPU->run(Bbox, Bbox.pad);
-    
+
     // auto poste = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> postc = poste - posts;
     // customLogger::getInstance()->info("post cost time : {}", postc.count());
     // customLogger::getInstance()->info("post FPS : {}", 1 / postc.count());
-    
+
     // // customLogger::getInstance()->debug("do baseInferenceGPU done");
 
-    // cv::Mat resultImage = Bbox.orinImage.clone();
-    // for (int i = 0; i < Bbox.indices.size(); i++)
-    // {
-    //     customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}, id: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height, Bbox.classId[i]);
-    //     char classIdStr[16];
-    //     sprintf(classIdStr, "%d", Bbox.classId[Bbox.indices[i]]);
+    if (getImshowFlag("IMSHOW_FLAG"))
+    {
+        cv::Mat resultImage = Bbox.orinImage.clone();
+        for (int i = 0; i < Bbox.indices.size(); i++)
+        {
+            customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}, id: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height, Bbox.classId[i]);
+            char classIdStr[16];
+            sprintf(classIdStr, "%d", Bbox.classId[Bbox.indices[i]]);
 
-    //     cv::rectangle(resultImage, Bbox.rect[i], cv::Scalar(0, 0, 255), 2);
-    //     // cv::rectangle(Bbox.resizeImage, Bbox.rect[i], cv::Scalar(0, 0, 255), 2);
-    // }
+            cv::rectangle(resultImage, Bbox.rect[i], cv::Scalar(0, 0, 255), 2);
+            // cv::rectangle(Bbox.resizeImage, Bbox.rect[i], cv::Scalar(0, 0, 255), 2);
+        }
 
-    // cv::namedWindow("Result Image", cv::WINDOW_NORMAL);
-    // cv::resizeWindow("Result Image", 640, 640);
-    // cv::imshow("Result Image", resultImage);
+        cv::namedWindow("Result Image", cv::WINDOW_NORMAL);
+        cv::resizeWindow("Result Image", 640, 640);
+        cv::imshow("Result Image", resultImage);
+    }
 }
+
+// baseInfer::baseInferenceGPUbatch()

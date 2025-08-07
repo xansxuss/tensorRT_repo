@@ -88,7 +88,7 @@ add_library(yamlParser SHARED src/yamlParser.cpp)
 target_link_libraries(yamlParser PRIVATE spdlog::spdlog ${OpenCV_LIBS} yaml-cpp)
 
 # 建立共享庫 imageProcess
-add_library(imageProcess SHARED src/imageProcess.cpp src/GPU_utils.cu)
+add_library(imageProcess SHARED src/imageProcess.cpp src/GPU_utils.cu src/GPUUtilsBatch.cu)
 target_link_libraries(imageProcess PRIVATE spdlog::spdlog ${OpenCV_LIBS} cudart setEnv)
 
 # 建立共享庫 infer

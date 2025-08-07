@@ -2,6 +2,7 @@ media:
   imagePath: /workspaces_data/repo/NVIDIA/TensorRT/infer/media/000000005060.jpg
   RTSPUrl: 
 model:
+  # modelPath: /workspaces_data/repo/NVIDIA/TensorRT/infer/model/yolov8n.engine
   modelPath: /workspaces_data/repo/NVIDIA/TensorRT/infer/model/yolov8n64-32.engine
   iouThreshold: 0.5
   nmsThreshold: 0.25

@@ -72,6 +72,7 @@ public:
     virtual void loadEngine(const std::string &enginePath, std::vector<char> &engineData);
     void baseInference(BBox &Bbox);
     void baseInferenceGPU(BBox &Bbox);
+    // void baseInferenceGPUbatch(BBoxBatch &BBoxBatch);
 
 protected:
     /// TensorRT Logger

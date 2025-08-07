@@ -12,24 +12,25 @@
 #include <thrust/execution_policy.h>
 #include "struct_type.h"
 
-
-
-
 // 前處理：
-__constant__ uint8_t d_constValue[3];
+// __constant__ uint8_t d_constValue[3];
 // GPU 核心函數
 __global__ void warpAffineKernel(
-    uint8_t* src, float* dst,float* hwcImage,
+    uint8_t *src, float *dst, float *hwcImage,
     int srcWidth, int srcHeight,
     int srcPitch,
     int dstWidth, int dstHeight,
-    const float* warpMatrix)
+    const float *warpMatrix)
 {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
 
+    uint8_t d_constValue[3] = {114, 114, 114};
+
     if (x >= dstWidth || y >= dstHeight)
-        {return;}
+    {
+        return;
+    }
 
     float mX1 = warpMatrix[0];
     float mY1 = warpMatrix[1];
@@ -39,16 +40,16 @@ __global__ void warpAffineKernel(
     float mZ2 = warpMatrix[5];
 
     float srcX = mX1 * x + mY1 * y + mZ1;
-    float srcY = mX2 * x + mY2 * y + mZ2 ;
+    float srcY = mX2 * x + mY2 * y + mZ2;
 
     float c0 = 0, c1 = 0, c2 = 0;
 
-    if (srcX <= -1 || srcX >= srcWidth || srcY <= -1 || srcY >= srcHeight)
+    if (srcX <= -1 || srcX >= srcWidth -1  || srcY <= -1 || srcY >= srcHeight -1 )
     {
-    // 這裡直接填預設顏色
-    c0 = 114.0f;
-    c1 = 114.0f;
-    c2 = 114.0f;
+        // 這裡直接填預設顏色
+        c0 = 114.0f;
+        c1 = 114.0f;
+        c2 = 114.0f;
     }
     else
     {
@@ -67,10 +68,13 @@ __global__ void warpAffineKernel(
         float w3 = hx * ly;
         float w4 = lx * ly;
 
-        uint8_t* v1 = d_constValue;
-        uint8_t* v2 = d_constValue;
-        uint8_t* v3 = d_constValue;
-        uint8_t* v4 = d_constValue;
+        // printf("xLow : %d, yLow : %d, XHigh : %d, YHigh : %d \n", xLow, yLow, xHigh, yHigh);
+        // printf("lx : %.2f, ly : %.2f, hx : %.2f, hy : %.2f \n", lx, ly, hx, hy);
+
+        uint8_t *v1 = d_constValue;
+        uint8_t *v2 = d_constValue;
+        uint8_t *v3 = d_constValue;
+        uint8_t *v4 = d_constValue;
 
         if (yLow >= 0 && yLow < srcHeight)
         {
@@ -96,14 +100,14 @@ __global__ void warpAffineKernel(
     c1 = c1 / 255.0f;
     c2 = c2 / 255.0f;
 
-    // debug show 
+    // debug show
     int dstIdx = (y * dstWidth + x) * 3;
     hwcImage[dstIdx + 0] = c0;
     hwcImage[dstIdx + 1] = c1;
     hwcImage[dstIdx + 2] = c2;
 
-    //BGR to RGB
-    float t =c2;
+    // BGR to RGB
+    float t = c2;
     c2 = c0;
     c0 = t;
 
@@ -115,11 +119,11 @@ __global__ void warpAffineKernel(
 
 // 2. Host function：準備常數並呼叫 kernel
 void launchWarpAffineKernel(
-    uint8_t* src, float* dst,float* hwcImage,
+    uint8_t *src, float *dst, float *hwcImage,
     int srcWidth, int srcHeight,
     int srcPitch,
     int dstWidth, int dstHeight,
-    const float* warpMatrix,
+    const float *warpMatrix,
     dim3 grid, dim3 block)
 {
     // std::cout << "Matrix: " << warpMatrix[0] << ", " << warpMatrix[1] << ", " << warpMatrix[2] << ", "
@@ -127,25 +131,28 @@ void launchWarpAffineKernel(
 
     // 呼叫 kernel
     warpAffineKernel<<<grid, block>>>(
-        src, dst, hwcImage,srcWidth, srcHeight,srcPitch, dstWidth ,dstHeight, warpMatrix);
+        src, dst, hwcImage, srcWidth, srcHeight, srcPitch, dstWidth, dstHeight, warpMatrix);
 
     // 同步與錯誤檢查
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
+    if (err != cudaSuccess)
+    {
         std::cerr << "Kernel launch failed: " << cudaGetErrorString(err) << std::endl;
-            }
-    cudaDeviceSynchronize();  // 確保完成
+    }
+    cudaDeviceSynchronize(); // 確保完成
     // std::cout << "warpAffineKernel execution complete." << std::endl;
 }
 
+// 後處理:
+// 1.decode kernel
 
-//後處理:
-//1.decode kernel
-
-__global__ void decodeBoxesKernel(float* outputptr, Box* boxes,float scoreThreshold,int numBoxes,int numAttrs)
+__global__ void decodeBoxesKernel(float *outputptr, Box *boxes, float scoreThreshold, int numBoxes, int numAttrs)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numBoxes) {return;}
+    if (idx >= numBoxes)
+    {
+        return;
+    }
     int numClass = numAttrs - 4; // 4 個屬性是 x, y, w, h
     // 每個 box 的起始位置
     // output layout: [84][8400] => output[attr * num_boxes + box_index]
@@ -157,56 +164,64 @@ __global__ void decodeBoxesKernel(float* outputptr, Box* boxes,float scoreThresh
 
     int classId = -1;
     float maxScore = -1.0f;
-    for (int i = 4; i < numClass; i++) {
+    for (int i = 4; i < numClass; i++)
+    {
         float score = outputptr[i * numBoxes + idx];
-        if (score > maxScore) {
+        if (score > maxScore)
+        {
             maxScore = score;
             classId = i - 4; // 因為前面有 4 個屬性
         }
     }
     // 將結果寫入 boxes
     Box box;
-    box.x = (x - ( w / 2 ));
-    box.y = (y - ( h / 2 ));
+    box.x = (x - (w / 2));
+    box.y = (y - (h / 2));
     box.w = w;
     box.h = h;
     box.classId = classId;
     box.score = maxScore;
-    if (maxScore < scoreThreshold){
+    if (maxScore < scoreThreshold)
+    {
         box.keep = 0;
-    }else{
-    box.keep = 1;
+    }
+    else
+    {
+        box.keep = 1;
     }
     boxes[idx] = box;
 }
 
-struct BoxCompare {
-    __device__ bool operator()(const Box& a, const Box& b) const {
+struct BoxCompare
+{
+    __device__ bool operator()(const Box &a, const Box &b) const
+    {
         return a.score > b.score;
     }
 };
 
-void sortBoxesByScore(Box* d_boxes, int numBoxes)
+void sortBoxesByScore(Box *d_boxes, int numBoxes)
 {
     thrust::device_ptr<Box> dev_ptr = thrust::device_pointer_cast(d_boxes);
 
-thrust::sort(thrust::device, d_boxes, d_boxes + numBoxes, BoxCompare());
+    thrust::sort(thrust::device, d_boxes, d_boxes + numBoxes, BoxCompare());
 }
 
-void launchDecodeBoxesKernel(float* outputptr, Box* boxes,float scoreThreshold, int numBoxes, int numAttrs)
+void launchDecodeBoxesKernel(float *outputptr, Box *boxes, float scoreThreshold, int numBoxes, int numAttrs)
 {
     dim3 block(256);
     dim3 grid((numBoxes + block.x - 1) / block.x);
     decodeBoxesKernel<<<grid, block>>>(outputptr, boxes, scoreThreshold, numBoxes, numAttrs);
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
+    if (err != cudaSuccess)
+    {
         std::cerr << "Kernel launch failed: " << cudaGetErrorString(err) << std::endl;
     }
-    cudaDeviceSynchronize();  // 確保完成
+    cudaDeviceSynchronize(); // 確保完成
     // sortBoxesByScore(boxes, numBoxes);
 }
 // 2.NMS Unit
-__device__ float IOU(Box& a,Box& b)
+__device__ float IOU(Box &a, Box &b)
 {
     float x1 = max(a.x, b.x);
     float y1 = max(a.y, b.y);
@@ -220,43 +235,52 @@ __device__ float IOU(Box& a,Box& b)
     float unionArea = a.w * a.h + b.w * b.h - interArea;
     return interArea / unionArea;
 }
-__global__ void nmsKernel(Box* d_boxes,int numBoxes,float iou_threshold)
+__global__ void nmsKernel(Box *d_boxes, int numBoxes, float iou_threshold)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numBoxes || d_boxes[idx].keep == 0) {return;}
+    if (idx >= numBoxes || d_boxes[idx].keep == 0)
+    {
+        return;
+    }
 
-    for (int j = 0; j < idx; ++j) {
-        if (d_boxes[j].keep && IOU(d_boxes[idx], d_boxes[j]) > iou_threshold) {
+    for (int j = 0; j < idx; ++j)
+    {
+        if (d_boxes[j].keep && IOU(d_boxes[idx], d_boxes[j]) > iou_threshold)
+        {
             d_boxes[idx].keep = 0;
-            return;  // 不需要再比下去了
+            return; // 不需要再比下去了
         }
     }
     // 若通過所有 IoU 檢查，則保留
     d_boxes[idx].keep = 1;
 }
 
-void launchNMSKernel(Box* d_boxes,int numBoxes,float iou_threshold)
+void launchNMSKernel(Box *d_boxes, int numBoxes, float iou_threshold)
 {
     int threads = 256;
     int blocks = (numBoxes + threads - 1) / threads;
-    nmsKernel<<<blocks, threads>>>(d_boxes, numBoxes,iou_threshold);
+    nmsKernel<<<blocks, threads>>>(d_boxes, numBoxes, iou_threshold);
     cudaDeviceSynchronize();
 }
 
-__global__ void unscaleKernel(Box* d_boxes,int numBoxes,float left,float top,float modelWidth,float modelHeight,float width, float height){
+__global__ void unscaleKernel(Box *d_boxes, int numBoxes, float left, float top, float modelWidth, float modelHeight, float width, float height)
+{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numBoxes || d_boxes[idx].keep == 0) {return;}
+    if (idx >= numBoxes || d_boxes[idx].keep == 0)
+    {
+        return;
+    }
     d_boxes[idx].x = (d_boxes[idx].x * modelWidth) - left;
     d_boxes[idx].y = (d_boxes[idx].y * modelHeight) - top;
     d_boxes[idx].w = d_boxes[idx].w * modelWidth;
     d_boxes[idx].h = d_boxes[idx].h * modelHeight;
-
 }
 
-void launchUnscale(Box* d_boxes,int numBoxes,float left,float top,float modelWidth,float modelHeight,float width, float height){
+void launchUnscale(Box *d_boxes, int numBoxes, float left, float top, float modelWidth, float modelHeight, float width, float height)
+{
     int threads = 265;
-    int blocks = (numBoxes + threads -1) / threads;
-    unscaleKernel<<<blocks, threads>>>(d_boxes,numBoxes,left,top,modelWidth,modelHeight,width,height);
+    int blocks = (numBoxes + threads - 1) / threads;
+    unscaleKernel<<<blocks, threads>>>(d_boxes, numBoxes, left, top, modelWidth, modelHeight, width, height);
     // printf("modelWidth: %f, modelHeight: %f\n", modelWidth, modelHeight);
     // printf("width: %f, height: %f\n", width, height);
     cudaDeviceSynchronize();

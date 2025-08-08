@@ -237,7 +237,7 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     // customLogger::getInstance()->debug("static_cast<int>(inputImage.step):{}", static_cast<int>(inputImage.step));
     // customLogger::getInstance()->debug("inputImage.elemSize():{}", inputImage.elemSize());
     // // 5. 直接下載到 CPU
-    customLogger::getInstance()->debug("pointer GPU to CPU");
+    // customLogger::getInstance()->debug("pointer GPU to CPU");
     std::vector<float> cpuBuffer(outW * outH * 3);
     cudaMemcpy(cpuBuffer.data(), hwcImage, outBytes, cudaMemcpyDeviceToHost);
 
@@ -583,6 +583,7 @@ yoloPostprocessGPU::yoloPostprocessGPU()
     if (err != cudaSuccess)
     {
         std::cerr << "cudaMalloc failed: " << cudaGetErrorString(err) << std::endl;
+        customLogger::getInstance()->error("cudaMalloc failed: {}", cudaGetErrorString(err));
     }
     cudaMalloc(&d_warpMatrix, 6 * sizeof(float));
     // else
@@ -614,20 +615,13 @@ void yoloPostprocessGPU::run(BBox &bbox)
     // float matrix_inv[6] = {0};
     // memcpy(matrix_inv, bbox.pad.warpMatrix_inv, 6 * sizeof(float));
 
-    // customLogger::getInstance()->debug("cuda process bbox.pad.warpMatrix_inv: {},{},{},{},{},{}", bbox.pad.warpMatrix_inv[0], bbox.pad.warpMatrix_inv[1], bbox.pad.warpMatrix_inv[2],
-    //                                    bbox.pad.warpMatrix_inv[3], bbox.pad.warpMatrix_inv[4], bbox.pad.warpMatrix_inv[5]);
+    customLogger::getInstance()->debug("host process bbox.pad.warpMatrix_inv: {},{},{},{},{},{}", bbox.pad.warpMatrix[0], bbox.pad.warpMatrix[1], bbox.pad.warpMatrix[2],
+                                       bbox.pad.warpMatrix[3], bbox.pad.warpMatrix[4], bbox.pad.warpMatrix[5]);
 
-    // customLogger::getInstance()->debug("cuda process Matrix_inv: {},{},{},{},{},{}", matrix_inv[0], matrix_inv[1], matrix_inv[2],
+    // customLogger::getInstance()->debug("host process Matrix_inv: {},{},{},{},{},{}", matrix_inv[0], matrix_inv[1], matrix_inv[2],
     //                                    matrix_inv[3], matrix_inv[4], matrix_inv[5]);
 
-    customLogger::getInstance()->debug("copy cpu to gpu");
     cudaMemcpy(d_warpMatrix, bbox.pad.warpMatrix, 6 * sizeof(float), cudaMemcpyHostToDevice);
-    // cudaError_t err = cudaMemcpy(d_warpMatrix, bbox.pad.warpMatrix_inv, sizeof(float) * 6, cudaMemcpyHostToDevice);
-    // if (err != cudaSuccess)
-    // {
-    //     printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
-    //     // 處理錯誤或return
-    // }
 
     // float *outputDataGPU = (float *)malloc(mBindings[1].H * mBindings[1].C * sizeof(float));
     // cudaMemcpy(outputDataGPU, reinterpret_cast<float *>(mBindings[1].device_ptr), mBindings[1].H * mBindings[1].C * sizeof(float), cudaMemcpyDeviceToHost);
@@ -658,7 +652,7 @@ void yoloPostprocessGPU::run(BBox &bbox)
     launchNMSKernel(d_boxes, mBindings[1].H, bbox.cfg.iouThreshold);
 
     customLogger::getInstance()->debug("launchInverse");
-    launchInverse(d_boxes, mBindings[1].H, d_warpMatrix, bbox.width, bbox.height, bbox.orinImage.cols, bbox.orinImage.rows);
+    launchInverse(d_boxes, mBindings[1].H, d_warpMatrix, bbox.pad.ratio, bbox.width, bbox.height, bbox.orinImage.cols, bbox.orinImage.rows);
 
     // debug decodeboxes
     host_boxes = new Box[mBindings[1].H];

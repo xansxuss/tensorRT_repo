@@ -18,6 +18,6 @@ void launchDecodeBoxesKernel(float *outputptr, Box *boxes, float scoreThreshold,
 __global__ void nmsKernel(Box *d_boxes, int numBoxes, float iou_threshold);
 void launchNMSKernel(Box *d_boxes, int numBoxes, float iou_threshold);
 
-__global__ void InverseKernel(Box *d_boxes, int numBoxes, const float *warpMatrix, float modelWidth, float modelHeight, float width, float height);
-void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix,float modelWidth, float modelHeight, float width, float height);
+__global__ void InverseKernel(Box *d_boxes, int numBoxes, const float *warpMatrix,const float scale,float modelWidth, float modelHeight, float width, float height);
+void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix,const float scale,float modelWidth, float modelHeight, float width, float height);
 #endif

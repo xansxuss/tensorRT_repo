@@ -263,7 +263,7 @@ void launchNMSKernel(Box *d_boxes, int numBoxes, float iou_threshold)
     cudaDeviceSynchronize();
 }
 
-__global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix, float modelWidth, float modelHeight, float width, float height)
+__global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix, const float scale,float modelWidth, float modelHeight, float width, float height)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numBoxes || d_boxes[idx].keep == 0)
@@ -275,7 +275,7 @@ __global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix
     // - scale 是原本前處理的縮放比例（等比）
     // - modelWidth, modelHeight 是模型輸入大小
     // - width, height 是原圖大小
-
+    printf("old-> X : %f, Y : %f, W : %f, H: %f \n",d_boxes[idx].x,d_boxes[idx].y,d_boxes[idx].w,d_boxes[idx].h);
     float mx = d_boxes[idx].x * modelWidth;
     float my = d_boxes[idx].y * modelHeight;
     float mw = d_boxes[idx].w * modelWidth;
@@ -285,7 +285,7 @@ __global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix
     float ox = warpMatrix[0] * mx + warpMatrix[1] * my + warpMatrix[2];
     float oy = warpMatrix[3] * mx + warpMatrix[4] * my + warpMatrix[5];
 
-    float scale = warpMatrix[0];
+    // float scale = warpMatrix[0];
     // inverse scale and normalize
     float iw = mw / scale / width;
     float ih = mh / scale / height;
@@ -294,12 +294,13 @@ __global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix
     d_boxes[idx].y = oy / height;
     d_boxes[idx].w = iw;
     d_boxes[idx].h = ih;
+    printf("new-> X : %f, Y : %f, W : %f, H: %f \n",d_boxes[idx].x,d_boxes[idx].y,d_boxes[idx].w,d_boxes[idx].h);
 }
-void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix, float modelWidth, float modelHeight, float width, float height)
+void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix,const float scale, float modelWidth, float modelHeight, float width, float height)
 {
-    int threads = 265;
+    int threads = 256;
     int blocks = (numBoxes + threads - 1) / threads;
-    InverseKernel<<<blocks, threads>>>(d_boxes, numBoxes, warpMatrix, modelWidth, modelHeight, width, height);
+    InverseKernel<<<blocks, threads>>>(d_boxes, numBoxes, warpMatrix,scale, modelWidth, modelHeight, width, height);
     // printf("modelWidth: %f, modelHeight: %f\n", modelWidth, modelHeight);
     // printf("width: %f, height: %f\n", width, height);
     cudaDeviceSynchronize();

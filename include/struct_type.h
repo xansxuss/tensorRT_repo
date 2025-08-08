@@ -51,6 +51,7 @@ struct Pad
     float ratio = 0.0f;
     float dw = 0.0f;
     float dh = 0.0f;
+    float warpMatrix[6];
 };
 
 struct Box
@@ -81,7 +82,7 @@ struct BBox
     int width;
     int height;
     int channel;
-    std::vector<cv::Rect> rect;
+    std::vector<cv::Rect_<float>> rect;
     std::vector<int> indices;
     std::vector<int> classId;
     std::vector<float> score;

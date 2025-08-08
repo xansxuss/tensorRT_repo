@@ -12,7 +12,7 @@ inline void checkCuda(cudaError_t result, const char *msg = "CUDA Error")
     if (result != cudaSuccess)
     {
         customLogger::getInstance()->error("CUDA Error: {}", cudaGetErrorString(result));
-        throw std::runtime_error(std::string(msg) + ": " + cudaGetErrorString(result));
+        throw std::runtime_error(std::string("[CUDA] ") + msg + ": " + cudaGetErrorString(result));
     }
 }
 
@@ -64,7 +64,7 @@ public:
 private:
     void destroy()
     {
-        if (stream_)
+        if (stream_ != nullptr)
         {
             cudaStreamDestroy(stream_);
             stream_ = nullptr;
@@ -278,6 +278,8 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
     Bbox.batch = mBindings[0].N;
     Bbox.channel = mBindings[0].C;
 
+    // auto pros = std::chrono::high_resolution_clock::now();
+
     mPreProcessGPU->run(Bbox);
 
     // auto proe = std::chrono::high_resolution_clock::now();
@@ -341,7 +343,7 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
 
     // auto posts = std::chrono::high_resolution_clock::now();
 
-    mPostProcessGPU->run(Bbox, Bbox.pad);
+    mPostProcessGPU->run(Bbox);
 
     // auto poste = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> postc = poste - posts;
@@ -353,19 +355,39 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
     if (getImshowFlag("IMSHOW_FLAG"))
     {
         cv::Mat resultImage = Bbox.orinImage.clone();
+        // cv::Mat resizeImage;
+        // cv::Size newsize(static_cast<int>(Bbox.width - (Bbox.pad.left * 2)), static_cast<int>(Bbox.height - (Bbox.pad.top * 2)));
+        // customLogger::getInstance()->debug("newsize : {}\n", newsize);
+        // cv::resize(Bbox.orinImage, resizeImage, newsize);
         for (int i = 0; i < Bbox.indices.size(); i++)
         {
             customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}, id: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height, Bbox.classId[i]);
             char classIdStr[16];
             sprintf(classIdStr, "%d", Bbox.classId[Bbox.indices[i]]);
 
-            cv::rectangle(resultImage, Bbox.rect[i], cv::Scalar(0, 0, 255), 2);
-            // cv::rectangle(Bbox.resizeImage, Bbox.rect[i], cv::Scalar(0, 0, 255), 2);
+            cv::Rect box;
+            box.x = std::clamp(static_cast<int>(std::round(Bbox.rect[i].x * resultImage.cols)), 0, resultImage.cols - 1);
+            box.y = std::clamp(static_cast<int>(std::round(Bbox.rect[i].y * resultImage.rows)), 0, resultImage.rows - 1);
+            box.width = std::clamp(static_cast<int>(std::round(Bbox.rect[i].width * resultImage.cols)), 0, resultImage.cols - box.x);
+            box.height = std::clamp(static_cast<int>(std::round(Bbox.rect[i].height * resultImage.rows)), 0, resultImage.rows - box.y);
+            customLogger::getInstance()->debug("box.rect x: {}, y: {}, w: {}, h: {}", box.x, box.y, box.width, box.height);
+            // cv::rectangle(resultImage, box, cv::Scalar(0, 0, 255), 2);
+            cv::rectangle(resultImage, box, cv::Scalar(0, 0, 255), 2);
+            // cv::rectangle(resizeImage, cv::Rect(80,153,81,94), cv::Scalar(0, 0, 255), 2);
+            box.x = static_cast<int>(Bbox.rect[i].x * Bbox.resizeImage.cols);
+            box.y = static_cast<int>(Bbox.rect[i].y * Bbox.resizeImage.rows);
+            box.width = static_cast<int>(Bbox.rect[i].width * Bbox.resizeImage.cols);
+            box.height = static_cast<int>(Bbox.rect[i].height * Bbox.resizeImage.rows);
+            customLogger::getInstance()->debug("box.rect x: {}, y: {}, w: {}, h: {}", box.x, box.y, box.width, box.height);
+            cv::rectangle(Bbox.resizeImage, box, cv::Scalar(0, 0, 255), 2);
         }
 
         cv::namedWindow("Result Image", cv::WINDOW_NORMAL);
         cv::resizeWindow("Result Image", 640, 640);
         cv::imshow("Result Image", resultImage);
+        cv::namedWindow("Result resizeImage", cv::WINDOW_NORMAL);
+        cv::resizeWindow("Result resizeImage", 640, 640);
+        cv::imshow("Result resizeImage", Bbox.resizeImage);
     }
 }
 

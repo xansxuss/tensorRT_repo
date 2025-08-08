@@ -38,13 +38,14 @@ __device__ void batchWarpAffineKernel(uint8_t *src, float *dst, infoModel &devIn
 
     float srcX = mX1 * x + mY1 * y + mZ1;
     float srcY = mX2 * x + mY2 + y + mZ2;
-    float c0 = 0, c1 = 0, c2 = 0;
+    float c0 = 114.0f, c1 = 114.0f, c2 = 114.0f;
 
     if (srcX <= -1 || srcX >= devInfomodel.srcWidth || srcY <= -1 || srcY >= devInfomodel.srcHeight)
     {
-        c0 = 114.0f;
-        c1 = 114.0f;
-        c2 = 114.0f;
+        // c0 = 114.0f;
+        // c1 = 114.0f;
+        // c2 = 114.0f;
+        return;
     }
     else
     {

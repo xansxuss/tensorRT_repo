@@ -68,6 +68,8 @@ class yoloPostprocessGPU
 {
 private:
     Box *d_boxes = nullptr;
+    Box *host_boxes;
+    float *d_warpMatrix = nullptr;
     //     void NonMaxSuppressionGPU();
     //     void softNonMaxSuppressionGPU();
     //     float ComputeIoUGPU();
@@ -76,7 +78,7 @@ private:
 public:
     yoloPostprocessGPU();
     ~yoloPostprocessGPU();
-    void run(BBox &bbox, Pad &pad);
+    void run(BBox &bbox);
 };
 
 #endif

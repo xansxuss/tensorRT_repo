@@ -44,7 +44,7 @@ __global__ void warpAffineKernel(
 
     float c0 = 0, c1 = 0, c2 = 0;
 
-    if (srcX <= -1 || srcX >= srcWidth -1  || srcY <= -1 || srcY >= srcHeight -1 )
+    if (srcX <= -1 || srcX >= srcWidth - 1 || srcY <= -1 || srcY >= srcHeight - 1)
     {
         // 這裡直接填預設顏色
         c0 = 114.0f;
@@ -174,7 +174,7 @@ __global__ void decodeBoxesKernel(float *outputptr, Box *boxes, float scoreThres
         }
     }
     // 將結果寫入 boxes
-    Box box;
+    Box &box = boxes[idx];
     box.x = (x - (w / 2));
     box.y = (y - (h / 2));
     box.w = w;
@@ -263,24 +263,43 @@ void launchNMSKernel(Box *d_boxes, int numBoxes, float iou_threshold)
     cudaDeviceSynchronize();
 }
 
-__global__ void unscaleKernel(Box *d_boxes, int numBoxes, float left, float top, float modelWidth, float modelHeight, float width, float height)
+__global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix, float modelWidth, float modelHeight, float width, float height)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numBoxes || d_boxes[idx].keep == 0)
     {
         return;
     }
-    d_boxes[idx].x = (d_boxes[idx].x * modelWidth) - left;
-    d_boxes[idx].y = (d_boxes[idx].y * modelHeight) - top;
-    d_boxes[idx].w = d_boxes[idx].w * modelWidth;
-    d_boxes[idx].h = d_boxes[idx].h * modelHeight;
-}
+    // - d_boxes[idx] 是 normalized bbox in model input space
+    // - warpMatrix[6] 是 inverse affine matrix: [a11, a12, b1, a21, a22, b2]
+    // - scale 是原本前處理的縮放比例（等比）
+    // - modelWidth, modelHeight 是模型輸入大小
+    // - width, height 是原圖大小
 
-void launchUnscale(Box *d_boxes, int numBoxes, float left, float top, float modelWidth, float modelHeight, float width, float height)
+    float mx = d_boxes[idx].x * modelWidth;
+    float my = d_boxes[idx].y * modelHeight;
+    float mw = d_boxes[idx].w * modelWidth;
+    float mh = d_boxes[idx].h * modelHeight;
+
+    // inverse affine transform center point
+    float ox = warpMatrix[0] * mx + warpMatrix[1] * my + warpMatrix[2];
+    float oy = warpMatrix[3] * mx + warpMatrix[4] * my + warpMatrix[5];
+
+    float scale = warpMatrix[0];
+    // inverse scale and normalize
+    float iw = mw / scale / width;
+    float ih = mh / scale / height;
+
+    d_boxes[idx].x = ox / width;
+    d_boxes[idx].y = oy / height;
+    d_boxes[idx].w = iw;
+    d_boxes[idx].h = ih;
+}
+void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix, float modelWidth, float modelHeight, float width, float height)
 {
     int threads = 265;
     int blocks = (numBoxes + threads - 1) / threads;
-    unscaleKernel<<<blocks, threads>>>(d_boxes, numBoxes, left, top, modelWidth, modelHeight, width, height);
+    InverseKernel<<<blocks, threads>>>(d_boxes, numBoxes, warpMatrix, modelWidth, modelHeight, width, height);
     // printf("modelWidth: %f, modelHeight: %f\n", modelWidth, modelHeight);
     // printf("width: %f, height: %f\n", width, height);
     cudaDeviceSynchronize();

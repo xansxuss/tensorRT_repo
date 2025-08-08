@@ -179,7 +179,7 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     float tx = (static_cast<float>(bbox.width) - (scale * static_cast<float>(bbox.gpuInputImage.cols))) * 0.5f;
     float ty = (static_cast<float>(bbox.height) - (scale * static_cast<float>(bbox.gpuInputImage.rows))) * 0.5f;
 
-        // 計算 padding 的大小
+    // 計算 padding 的大小
     bbox.pad.left = static_cast<int>(std::floor(tx));
     bbox.pad.right = static_cast<int>(std::ceil(tx));
     bbox.pad.top = static_cast<int>(std::floor(ty));
@@ -196,9 +196,11 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
 
     // cv::Mat warpMatrix_inv;
     cv::invertAffineTransform(warpMatrix, warpMatrix_inv);
+    memcpy(bbox.pad.warpMatrix, warpMatrix_inv.ptr<float>(), sizeof(float) * 6);
     customLogger::getInstance()->debug("cuda process warpMatrix_inv: {},{},{},{},{},{}", warpMatrix_inv.at<float>(0, 0), warpMatrix_inv.at<float>(0, 1), warpMatrix_inv.at<float>(0, 2),
-                                       warpMatrix_inv.at<float>(1, 0), warpMatrix_inv.at<float>(1, 1), warpMatrix_inv.at<float>(1, 2));
-
+                                       warpMatrix_inv.at<float>(1, 0), warpMatrix.at<float>(1, 1), warpMatrix_inv.at<float>(1, 2));
+    customLogger::getInstance()->debug("cuda process bbox.pad.warpMatrix_inv: {},{},{},{},{},{}", bbox.pad.warpMatrix[0], bbox.pad.warpMatrix[1], bbox.pad.warpMatrix[2],
+                                       bbox.pad.warpMatrix[3], bbox.pad.warpMatrix[4], bbox.pad.warpMatrix[5]);
     // 1. 明確地以 modelInsize 計算記憶體
     const int outN = mBindings.at(0).N;
     const int outW = mBindings.at(0).W;
@@ -288,6 +290,7 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
         cv::namedWindow("hwcwarpImageINT", cv::WINDOW_NORMAL);
         cv::resizeWindow("hwcwarpImageINT", 640, 640);
         cv::imshow("hwcwarpImageINT", hwcwarpImageINT);
+        hwcwarpImageINT.copyTo(bbox.resizeImage);
         // cv::imwrite("cuda_process_chw2hwc_debug.jpg", outputImage);
     }
     // cudaFree(d_warpMatrix);
@@ -581,6 +584,7 @@ yoloPostprocessGPU::yoloPostprocessGPU()
     {
         std::cerr << "cudaMalloc failed: " << cudaGetErrorString(err) << std::endl;
     }
+    cudaMalloc(&d_warpMatrix, 6 * sizeof(float));
     // else
     // {
     //     std::cout << "[Constructor] d_boxes allocated at: " << d_boxes << std::endl;
@@ -590,8 +594,10 @@ yoloPostprocessGPU::~yoloPostprocessGPU()
 {
     // Destructor
     cudaFree(d_boxes);
+    cudaFree(d_warpMatrix);
+    free(host_boxes);
 }
-void yoloPostprocessGPU::run(BBox &bbox, Pad &pad)
+void yoloPostprocessGPU::run(BBox &bbox)
 {
     // Implementation
     customLogger::getInstance()->debug("do yoloPostprocessGPU");
@@ -604,6 +610,24 @@ void yoloPostprocessGPU::run(BBox &bbox, Pad &pad)
         std::cerr << "[ERROR] mBindings[1].device_ptr is nullptr!" << std::endl;
     }
     cudaMemset(d_boxes, 0, sizeof(Box) * mBindings[1].H);
+
+    // float matrix_inv[6] = {0};
+    // memcpy(matrix_inv, bbox.pad.warpMatrix_inv, 6 * sizeof(float));
+
+    // customLogger::getInstance()->debug("cuda process bbox.pad.warpMatrix_inv: {},{},{},{},{},{}", bbox.pad.warpMatrix_inv[0], bbox.pad.warpMatrix_inv[1], bbox.pad.warpMatrix_inv[2],
+    //                                    bbox.pad.warpMatrix_inv[3], bbox.pad.warpMatrix_inv[4], bbox.pad.warpMatrix_inv[5]);
+
+    // customLogger::getInstance()->debug("cuda process Matrix_inv: {},{},{},{},{},{}", matrix_inv[0], matrix_inv[1], matrix_inv[2],
+    //                                    matrix_inv[3], matrix_inv[4], matrix_inv[5]);
+
+    customLogger::getInstance()->debug("copy cpu to gpu");
+    cudaMemcpy(d_warpMatrix, bbox.pad.warpMatrix, 6 * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaError_t err = cudaMemcpy(d_warpMatrix, bbox.pad.warpMatrix_inv, sizeof(float) * 6, cudaMemcpyHostToDevice);
+    // if (err != cudaSuccess)
+    // {
+    //     printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
+    //     // 處理錯誤或return
+    // }
 
     // float *outputDataGPU = (float *)malloc(mBindings[1].H * mBindings[1].C * sizeof(float));
     // cudaMemcpy(outputDataGPU, reinterpret_cast<float *>(mBindings[1].device_ptr), mBindings[1].H * mBindings[1].C * sizeof(float), cudaMemcpyDeviceToHost);
@@ -627,14 +651,17 @@ void yoloPostprocessGPU::run(BBox &bbox, Pad &pad)
     // outFileGPU.close();
     // free(outputDataGPU);
 
+    customLogger::getInstance()->debug("launchDecodeBoxesKernel");
     launchDecodeBoxesKernel(reinterpret_cast<float *>(mBindings[1].device_ptr), d_boxes, bbox.cfg.confThreshold, mBindings[1].H, mBindings[1].C);
 
+    customLogger::getInstance()->debug("launchNMSKernel");
     launchNMSKernel(d_boxes, mBindings[1].H, bbox.cfg.iouThreshold);
 
-    launchUnscale(d_boxes, mBindings[1].H, pad.left, pad.top, bbox.width, bbox.height, bbox.orinImage.cols, bbox.orinImage.rows);
+    customLogger::getInstance()->debug("launchInverse");
+    launchInverse(d_boxes, mBindings[1].H, d_warpMatrix, bbox.width, bbox.height, bbox.orinImage.cols, bbox.orinImage.rows);
 
     // debug decodeboxes
-    Box *host_boxes = new Box[mBindings[1].H];
+    host_boxes = new Box[mBindings[1].H];
     memset(host_boxes, 0, sizeof(Box) * mBindings[1].H);
     cudaMemcpy(host_boxes, d_boxes, sizeof(Box) * mBindings[1].H, cudaMemcpyDeviceToHost);
     // std::string GPUoutFile = "yoloPostprocessGPU_output.txt";
@@ -667,7 +694,7 @@ void yoloPostprocessGPU::run(BBox &bbox, Pad &pad)
             BBox box;
             bbox.classId.push_back(host_boxes[i].classId);
             bbox.indices.push_back(i);
-            bbox.rect.push_back(cv::Rect(static_cast<int>(host_boxes[i].x), static_cast<int>(host_boxes[i].y), static_cast<int>(host_boxes[i].w), static_cast<int>(host_boxes[i].h)));
+            bbox.rect.push_back(cv::Rect_<float>(host_boxes[i].x, host_boxes[i].y, host_boxes[i].w, host_boxes[i].h));
             bbox.score.push_back(host_boxes[i].score);
             countKeep++;
         }
@@ -686,5 +713,5 @@ void yoloPostprocessGPU::run(BBox &bbox, Pad &pad)
     customLogger::getInstance()->debug("bbox.pad.right): {}", bbox.pad.right);
     customLogger::getInstance()->debug("bbox.pad.bottom): {}", bbox.pad.bottom);
 
-    free(host_boxes);
+    
 }

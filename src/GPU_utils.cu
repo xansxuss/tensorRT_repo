@@ -22,6 +22,14 @@ __global__ void warpAffineKernel(
     int dstWidth, int dstHeight,
     const float *warpMatrix)
 {
+
+    __shared__ float sharedWarpMatrix[6];
+    if (threadIdx.x == 0 && threadIdx.y == 0)
+    {
+        for (int i = 0; i < 6; i++)
+            sharedWarpMatrix[i] = warpMatrix[i];
+    }
+    __syncthreads();
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -31,16 +39,22 @@ __global__ void warpAffineKernel(
     {
         return;
     }
+    // 用 sharedWarpMatrix
+    // float mX1 = sharedWarpMatrix[0];
+    // float mY1 = sharedWarpMatrix[1];
+    // float mZ1 = sharedWarpMatrix[2];
+    // float mX2 = sharedWarpMatrix[3];
+    // float mY2 = sharedWarpMatrix[4];
+    // float mZ2 = sharedWarpMatrix[5];
+    // float mX1 = warpMatrix[0];
+    // float mY1 = warpMatrix[1];
+    // float mZ1 = warpMatrix[2];
+    // float mX2 = warpMatrix[3];
+    // float mY2 = warpMatrix[4];
+    // float mZ2 = warpMatrix[5];
 
-    float mX1 = warpMatrix[0];
-    float mY1 = warpMatrix[1];
-    float mZ1 = warpMatrix[2];
-    float mX2 = warpMatrix[3];
-    float mY2 = warpMatrix[4];
-    float mZ2 = warpMatrix[5];
-
-    float srcX = mX1 * x + mY1 * y + mZ1;
-    float srcY = mX2 * x + mY2 * y + mZ2;
+    float srcX = sharedWarpMatrix[0] * x + sharedWarpMatrix[1] * y + sharedWarpMatrix[2];
+    float srcY = sharedWarpMatrix[3] * x + sharedWarpMatrix[4] * y + sharedWarpMatrix[5];
 
     float c0 = 0, c1 = 0, c2 = 0;
 
@@ -95,11 +109,6 @@ __global__ void warpAffineKernel(
         c1 = w1 * v1[1] + w2 * v2[1] + w3 * v3[1] + w4 * v4[1];
         c2 = w1 * v1[2] + w2 * v2[2] + w3 * v3[2] + w4 * v4[2];
     }
-    // normalization
-    c0 = c0 / 255.0f;
-    c1 = c1 / 255.0f;
-    c2 = c2 / 255.0f;
-
     // debug show
     int dstIdx = (y * dstWidth + x) * 3;
     hwcImage[dstIdx + 0] = c0;
@@ -111,10 +120,11 @@ __global__ void warpAffineKernel(
     c2 = c0;
     c0 = t;
 
+    // normalize and write to dst 
     int idx = y * dstWidth + x;
-    dst[idx + 0 * dstWidth * dstHeight] = c0; // R
-    dst[idx + 1 * dstWidth * dstHeight] = c1; // G
-    dst[idx + 2 * dstWidth * dstHeight] = c2; // B
+    dst[idx + 0 * dstWidth * dstHeight] = c0 / 255.0f; // R
+    dst[idx + 1 * dstWidth * dstHeight] = c1 / 255.0f; // G
+    dst[idx + 2 * dstWidth * dstHeight] = c2 / 255.0f; // B
 }
 
 // 2. Host function：準備常數並呼叫 kernel
@@ -174,7 +184,7 @@ __global__ void decodeBoxesKernel(float *outputptr, Box *boxes, float scoreThres
         }
     }
     // 將結果寫入 boxes
-    Box &box = boxes[idx];
+    Box box;
     box.x = (x - (w / 2));
     box.y = (y - (h / 2));
     box.w = w;
@@ -263,44 +273,82 @@ void launchNMSKernel(Box *d_boxes, int numBoxes, float iou_threshold)
     cudaDeviceSynchronize();
 }
 
-__global__ void InverseKernel(Box *d_boxes, int numBoxes,const float *warpMatrix, const float scale,float modelWidth, float modelHeight, float width, float height)
+__global__ void InverseKernel(Box *d_boxes, int numBoxes, const float *warpMatrix, const float scale, float modelWidth, float modelHeight, float width, float height)
 {
+    // int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // if (idx >= numBoxes || d_boxes[idx].keep == 0)
+    // {
+    //     return;
+    // }
+    // // - d_boxes[idx] 是 normalized bbox in model input space
+    // // - warpMatrix[6] 是 inverse affine matrix: [a11, a12, b1, a21, a22, b2]
+    // // - scale 是原本前處理的縮放比例（等比）
+    // // - modelWidth, modelHeight 是模型輸入大小
+    // // - width, height 是原圖大小
+    // printf("old-> X : %f, Y : %f, W : %f, H: %f \n",d_boxes[idx].x,d_boxes[idx].y,d_boxes[idx].w,d_boxes[idx].h);
+    // float mx = d_boxes[idx].x * modelWidth;
+    // float my = d_boxes[idx].y * modelHeight;
+    // float mw = d_boxes[idx].w * modelWidth;
+    // float mh = d_boxes[idx].h * modelHeight;
+
+    // // inverse affine transform center point
+    // float ox = warpMatrix[0] * mx + warpMatrix[1] * my + warpMatrix[2];
+    // float oy = warpMatrix[3] * mx + warpMatrix[4] * my + warpMatrix[5];
+
+    // // float scale = warpMatrix[0];
+    // // inverse scale and normalize
+    // float iw = mw / scale / width;
+    // float ih = mh / scale / height;
+
+    // d_boxes[idx].x = ox / width;
+    // d_boxes[idx].y = oy / height;
+    // d_boxes[idx].w = iw;
+    // d_boxes[idx].h = ih;
+    // printf("new-> X : %f, Y : %f, W : %f, H: %f \n",d_boxes[idx].x,d_boxes[idx].y,d_boxes[idx].w,d_boxes[idx].h);
+    __shared__ float sharedWarpMatrix[6];
+    __shared__ float sharedParams[5];
+
+    if (threadIdx.x == 0)
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            sharedWarpMatrix[i] = warpMatrix[i];
+        }
+        sharedParams[0] = scale;
+        sharedParams[1] = modelWidth;
+        sharedParams[2] = modelHeight;
+        sharedParams[3] = width;
+        sharedParams[4] = height;
+    }
+    __syncthreads();
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numBoxes || d_boxes[idx].keep == 0)
     {
         return;
     }
-    // - d_boxes[idx] 是 normalized bbox in model input space
-    // - warpMatrix[6] 是 inverse affine matrix: [a11, a12, b1, a21, a22, b2]
-    // - scale 是原本前處理的縮放比例（等比）
-    // - modelWidth, modelHeight 是模型輸入大小
-    // - width, height 是原圖大小
-    printf("old-> X : %f, Y : %f, W : %f, H: %f \n",d_boxes[idx].x,d_boxes[idx].y,d_boxes[idx].w,d_boxes[idx].h);
-    float mx = d_boxes[idx].x * modelWidth;
-    float my = d_boxes[idx].y * modelHeight;
-    float mw = d_boxes[idx].w * modelWidth;
-    float mh = d_boxes[idx].h * modelHeight;
 
-    // inverse affine transform center point
-    float ox = warpMatrix[0] * mx + warpMatrix[1] * my + warpMatrix[2];
-    float oy = warpMatrix[3] * mx + warpMatrix[4] * my + warpMatrix[5];
+    float mx = d_boxes[idx].x * sharedParams[1];
+    float my = d_boxes[idx].y * sharedParams[2];
+    float mw = d_boxes[idx].w * sharedParams[1];
+    float mh = d_boxes[idx].h * sharedParams[2];
 
-    // float scale = warpMatrix[0];
-    // inverse scale and normalize
-    float iw = mw / scale / width;
-    float ih = mh / scale / height;
+    float ox = sharedWarpMatrix[0] * mx + sharedWarpMatrix[1] * my + sharedWarpMatrix[2];
+    float oy = sharedWarpMatrix[3] * mx + sharedWarpMatrix[4] * my + sharedWarpMatrix[5];
 
-    d_boxes[idx].x = ox / width;
-    d_boxes[idx].y = oy / height;
+    float iw = mw / sharedParams[0] / sharedParams[3];
+    float ih = mh / sharedParams[0] / sharedParams[4];
+
+    d_boxes[idx].x = ox / sharedParams[3];
+    d_boxes[idx].y = oy / sharedParams[4];
     d_boxes[idx].w = iw;
     d_boxes[idx].h = ih;
-    printf("new-> X : %f, Y : %f, W : %f, H: %f \n",d_boxes[idx].x,d_boxes[idx].y,d_boxes[idx].w,d_boxes[idx].h);
 }
-void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix,const float scale, float modelWidth, float modelHeight, float width, float height)
+void launchInverse(Box *d_boxes, int numBoxes, const float *warpMatrix, const float scale, float modelWidth, float modelHeight, float width, float height)
 {
     int threads = 256;
     int blocks = (numBoxes + threads - 1) / threads;
-    InverseKernel<<<blocks, threads>>>(d_boxes, numBoxes, warpMatrix,scale, modelWidth, modelHeight, width, height);
+    InverseKernel<<<blocks, threads>>>(d_boxes, numBoxes, warpMatrix, scale, modelWidth, modelHeight, width, height);
     // printf("modelWidth: %f, modelHeight: %f\n", modelWidth, modelHeight);
     // printf("width: %f, height: %f\n", width, height);
     cudaDeviceSynchronize();

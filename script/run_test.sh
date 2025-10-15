@@ -3,10 +3,12 @@
 LOG_FILE="crash_log.txt"
 CRASH_COUNT=0
 
-export CUSTOMS_LEVEL_DEBUG="error"
-export IMSHOW_FLAG=TRUE
+export CUSTOMS_LEVEL_DEBUG="info"
+export IMSHOW_FLAG=FLASE
 
 echo "開始測試 $(date)" >> "$LOG_FILE"
+
+cd ../bin || exit 1
 
 rm "$LOG_FILE"
 

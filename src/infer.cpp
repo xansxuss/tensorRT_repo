@@ -12,7 +12,7 @@ inline void checkCuda(cudaError_t result, const char *msg = "CUDA Error")
     if (result != cudaSuccess)
     {
         customLogger::getInstance()->error("CUDA Error: {}", cudaGetErrorString(result));
-        throw std::runtime_error(std::string("[CUDA] ") + msg + ": " + cudaGetErrorString(result));
+        throw std::runtime_error(std::string(msg) + ": " + cudaGetErrorString(result));
     }
 }
 
@@ -64,7 +64,7 @@ public:
 private:
     void destroy()
     {
-        if (stream_ != nullptr)
+        if (stream_)
         {
             cudaStreamDestroy(stream_);
             stream_ = nullptr;
@@ -74,24 +74,41 @@ private:
 };
 
 /// 基礎推論類別
-/// 建構子實做
 baseInfer::baseInfer(const std::string &enginePath)
 {
-    // constructor
-    customLogger::getInstance()->debug("baseInfer constructor called with enginePath: {}", enginePath);
+    customLogger::getInstance()->debug("baseInfer constructoer called with enginePath : {}",enginePath);
     init(enginePath);
-    customLogger::getInstance()->debug("baseInfer constructor completed");
+    mPreprocessGPU = std::make_unique<yoloPreprocessGPU>();
+    mPostprocessGPU = std::make_unique<yoloPostprocessGPU>();
+    mPreprocess= std::make_unique<yoloPreprocess>();
+    mPostprocess = std::make_unique<yoloPostprocess>();
+};
+
+baseInfer::~basenfer()
+{
+    
+}
+
+
+
+/// 建構子實做
+YoloInfer::YoloInfer(const std::string &enginePath)
+{
+    // constructor
+    customLogger::getInstance()->debug("YoloInfer constructor called with enginePath: {}", enginePath);
+    init(enginePath);
+    customLogger::getInstance()->debug("YoloInfer constructor completed");
     mPreProcessGPU = std::make_unique<yoloPreprocessGPU>();
     mPostProcess = std::make_unique<yoloPostprocess>();
     mPostProcessGPU = std::make_unique<yoloPostprocessGPU>();
-    customLogger::getInstance()->debug("baseInfer initialized with preProcessGPU and postProcess");
+    customLogger::getInstance()->debug("YoloInfer initialized with preProcessGPU and postProcess");
 };
 
-baseInfer::~baseInfer() {
+YoloInfer::~YoloInfer() {
     // Deconstructor
 };
 
-void baseInfer::init(const std::string &enginePath)
+void YoloInfer::init(const std::string &enginePath)
 {
     mBindings.clear();
     std::vector<char> engineData;
@@ -144,7 +161,7 @@ void baseInfer::init(const std::string &enginePath)
     customLogger::getInstance()->debug("output Bindings dtype: {}", mBindings[1].dtype);
     customLogger::getInstance()->debug("output Bindings is_input: {}", mBindings[1].is_input);
 };
-void baseInfer::loadEngine(const std::string &enginePath, std::vector<char> &engineData)
+void YoloInfer::loadEngine(const std::string &enginePath, std::vector<char> &engineData)
 {
     // 讀取引擎檔案
     std::ifstream engineFile(enginePath, std::ios::binary | std::ios::ate);
@@ -166,7 +183,7 @@ void baseInfer::loadEngine(const std::string &enginePath, std::vector<char> &eng
     }
 }
 
-void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
+void YoloInfer::allocateBindings(std::vector<Binding> &mBindings)
 {
     int nbTensors = mEngine->getNbIOTensors();
     // std::cout << "Number of I/O tensors: " << nbTensors << std::endl;
@@ -221,9 +238,9 @@ void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
         mBindings.push_back(b);
     }
 };
-void baseInfer::baseInference(BBox &Bbox)
+void YoloInfer::YoloInference(BBox &Bbox)
 {
-    customLogger::getInstance()->debug("do baseInference");
+    customLogger::getInstance()->debug("do YoloInference");
     // customLogger::getInstance()->debug("input image size hight: {}, width: {}", Bbox.orinImage.rows, Bbox.orinImage.cols);
     Bbox.width = mBindings[0].W;
     Bbox.height = mBindings[0].H;
@@ -257,7 +274,7 @@ void baseInfer::baseInference(BBox &Bbox)
     // }
     yoloPostprocess yoloPostprocess;
     yoloPostprocess.run(Bbox);
-    customLogger::getInstance()->debug("do baseInference done");
+    customLogger::getInstance()->debug("do YoloInference done");
     for (int i = 0; i < Bbox.indices.size(); i++)
     {
         customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height);
@@ -267,18 +284,16 @@ void baseInfer::baseInference(BBox &Bbox)
     // cv::imwrite("result.jpg", Bbox.orinImage);
 };
 
-void baseInfer::baseInferenceGPU(BBox &Bbox)
+void YoloInfer::YoloInferenceGPU(BBox &Bbox)
 {
 
     CudaStream stream;
-    customLogger::getInstance()->debug("do baseInferenceGPU");
+    customLogger::getInstance()->debug("do YoloInferenceGPU");
     customLogger::getInstance()->debug("mBindings[0].w:{},mBindings[0].h:{}", mBindings[0].W, mBindings[0].H);
     Bbox.width = mBindings[0].W;
     Bbox.height = mBindings[0].H;
     Bbox.batch = mBindings[0].N;
     Bbox.channel = mBindings[0].C;
-
-    // auto pros = std::chrono::high_resolution_clock::now();
 
     mPreProcessGPU->run(Bbox);
 
@@ -350,15 +365,11 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
     // customLogger::getInstance()->info("post cost time : {}", postc.count());
     // customLogger::getInstance()->info("post FPS : {}", 1 / postc.count());
 
-    // // customLogger::getInstance()->debug("do baseInferenceGPU done");
+    // // customLogger::getInstance()->debug("do YoloInferenceGPU done");
 
     if (getImshowFlag("IMSHOW_FLAG"))
     {
         cv::Mat resultImage = Bbox.orinImage.clone();
-        // cv::Mat resizeImage;
-        // cv::Size newsize(static_cast<int>(Bbox.width - (Bbox.pad.left * 2)), static_cast<int>(Bbox.height - (Bbox.pad.top * 2)));
-        // customLogger::getInstance()->debug("newsize : {}\n", newsize);
-        // cv::resize(Bbox.orinImage, resizeImage, newsize);
         for (int i = 0; i < Bbox.indices.size(); i++)
         {
             customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}, id: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height, Bbox.classId[i]);
@@ -371,24 +382,12 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
             box.width = std::clamp(static_cast<int>(std::round(Bbox.rect[i].width * resultImage.cols)), 0, resultImage.cols - box.x);
             box.height = std::clamp(static_cast<int>(std::round(Bbox.rect[i].height * resultImage.rows)), 0, resultImage.rows - box.y);
             customLogger::getInstance()->debug("box.rect x: {}, y: {}, w: {}, h: {}", box.x, box.y, box.width, box.height);
-            // cv::rectangle(resultImage, box, cv::Scalar(0, 0, 255), 2);
             cv::rectangle(resultImage, box, cv::Scalar(0, 0, 255), 2);
-            // cv::rectangle(resizeImage, cv::Rect(80,153,81,94), cv::Scalar(0, 0, 255), 2);
-            box.x = static_cast<int>(Bbox.rect[i].x * Bbox.resizeImage.cols);
-            box.y = static_cast<int>(Bbox.rect[i].y * Bbox.resizeImage.rows);
-            box.width = static_cast<int>(Bbox.rect[i].width * Bbox.resizeImage.cols);
-            box.height = static_cast<int>(Bbox.rect[i].height * Bbox.resizeImage.rows);
-            customLogger::getInstance()->debug("box.rect x: {}, y: {}, w: {}, h: {}", box.x, box.y, box.width, box.height);
-            cv::rectangle(Bbox.resizeImage, box, cv::Scalar(0, 0, 255), 2);
         }
-
         cv::namedWindow("Result Image", cv::WINDOW_NORMAL);
         cv::resizeWindow("Result Image", 640, 640);
         cv::imshow("Result Image", resultImage);
-        cv::namedWindow("Result resizeImage", cv::WINDOW_NORMAL);
-        cv::resizeWindow("Result resizeImage", 640, 640);
-        cv::imshow("Result resizeImage", Bbox.resizeImage);
     }
 }
 
-// baseInfer::baseInferenceGPUbatch()
+// YoloInfer::YoloInferenceGPUbatch()

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 while true; do
-    jpg_count=$(find . -maxdepth 1 -type f -name '*.jpg' | wc -l)
+    jpg_count=$(find ../bin -maxdepth 1 -type f -name '*.jpg' | wc -l)
 
     if [ "$jpg_count" -gt 500 ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') 檔案數量 $jpg_count 超過限制，開始刪除..."

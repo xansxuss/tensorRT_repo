@@ -98,7 +98,7 @@ std::deque<BBox> inferDeque;
 //     customLogger::getInstance()->debug("Starting to show frames from deque...");
 //     int count = 0;
 //     BBox bbox;
-//     baseInfer infer(configstruct.enginePath);
+//     YoloInfer infer(configstruct.enginePath);
 //     while (true)
 //     {
 //         std::unique_lock<std::mutex> lock(mtxFrame); // ✅ 用 unique_lock
@@ -115,7 +115,7 @@ std::deque<BBox> inferDeque;
 //         inferDeque.emplace_back(bbox);
 //         inferDeque.pop_front();
 //         lock.unlock();
-//         infer.baseInferenceGPU(bbox);
+//         infer.YoloInferenceGPU(bbox);
 //         cv::Mat frame = bbox.orinImage;
 //         // cv::imshow("GPU Decoded Frame", frame);
 //         // std::ostringstream oss;
@@ -188,7 +188,8 @@ int main(int argc, char **argv)
     // BBox bbox;
 
     customLogger->debug("Starting base inference...");
-    baseInfer infer(configstruct.enginePath);
+    YoloInfer infer(configstruct.enginePath);
+    // std::unique_ptr<YoloInfer> infer = std::make_unique<YoloInfer>(configstruct.enginePath);
     customLogger->debug("Base inference initialized with engine file: {}", configstruct.enginePath);
     int processcount = 0;
     // while (cap.read(frame))
@@ -202,7 +203,7 @@ int main(int argc, char **argv)
     //     bbox.orinImage = frame;
     //     // BboxesDeque.emplace_back(bbox);
     //     // customLogger::getInstance()->debug("Read frame from video stream, size: {}", BboxesDeque.size());
-    //     infer.baseInferenceGPU(bbox);
+    //     infer.YoloInferenceGPU(bbox);
     //     // customLogger::getInstance()->debug("Read frame from video stream, size: {}x{}", frame.cols, frame.rows);
     //     // BboxesDeque.pop_front();
 
@@ -211,27 +212,33 @@ int main(int argc, char **argv)
     // }
     cv::Mat frame;
     // bbox.orinImage = image;
-    // infer.baseInferenceGPU(bbox);
+    // infer.YoloInferenceGPU(bbox);
 
     while (true)
     {
         // customLogger->info("Process count: {}", processcount);
         bbox.orinImage = image;
         auto start = std::chrono::high_resolution_clock::now();
-        infer.baseInferenceGPU(bbox);
+        infer.YoloInferenceGPU(bbox);
+        // infer->YoloInferenceGPU(bbox);
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> costtime = end - start;
         // customLogger->info("cost:{}",costtime.count());
         costtimes.push_back(costtime.count());
-        if (processcount % 60 == 0)
+        if (processcount % 10000 == 0)
         {
             float sum = std::accumulate(costtimes.begin(), costtimes.end(), 0.0);
             int count = costtimes.size();
             float average = sum / count;
-            customLogger->info("average : {}", average);
+            customLogger->info("average : {} S", average);
             // customLogger->info("count : {}", count);
-            customLogger->info("cost time : {}", average);
+            customLogger->info("cost time : {} S", average);
             customLogger->info("FPS : {}", 1 / average);
+        }
+        if (processcount == INT_MAX)
+        {
+            processcount = 0;
+            costtimes.clear();
         }
         if (getImshowFlag("IMSHOW_FLAG"))
         {

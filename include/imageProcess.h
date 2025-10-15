@@ -6,7 +6,6 @@
 #define LIBRARY_VERSION_MINOR 1
 #define LIBRARY_VERSION_PATCH 0
 
-
 #include <stdint.h>
 #include <iostream>
 #include <vector>
@@ -68,7 +67,7 @@ class yoloPostprocessGPU
 {
 private:
     Box *d_boxes = nullptr;
-    Box *host_boxes;
+    Box *host_boxes = nullptr;
     float *d_warpMatrix = nullptr;
     //     void NonMaxSuppressionGPU();
     //     void softNonMaxSuppressionGPU();

@@ -40,7 +40,7 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/external/spdlog)
 # 讓 spdlog 所有 target 支援 position-independent code（fPIC）
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-find_package(yaml-cpp REQUIRED PATHS)
+find_package(yaml-cpp REQUIRED)
 include_directories(${yaml-cpp_INCLUDE_DIRS})
 
 # 手動指定 TensorRT 與 CUDA 的位置

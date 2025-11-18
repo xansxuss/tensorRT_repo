@@ -6,7 +6,6 @@
 #define LIBRARY_VERSION_MINOR 1
 #define LIBRARY_VERSION_PATCH 0
 
-
 #include <stdint.h>
 #include <iostream>
 #include <vector>
@@ -68,17 +67,45 @@ class yoloPostprocessGPU
 {
 private:
     Box *d_boxes = nullptr;
-    Box *host_boxes;
+    Box *host_boxes = nullptr;
     float *d_warpMatrix = nullptr;
-    //     void NonMaxSuppressionGPU();
-    //     void softNonMaxSuppressionGPU();
-    //     float ComputeIoUGPU();
-    //     void DecodeBoundingBoxGPU();
-    //     void dePadBoxesGPU();
 public:
     yoloPostprocessGPU();
     ~yoloPostprocessGPU();
     void run(BBox &bbox);
 };
 
+class batchBasePreprocess
+{
+public:
+    cv::Mat warpMatrix_inv;
+    cv::Mat warpMatrix;
+    explicit batchBasePreprocess();
+    ~batchBasePreprocess();
+
+protected:
+    cv::Scalar color = cv::Scalar(114, 114, 114);
+    float *inputImagePtr;
+    float *outputImagePtr;
+    float *d_warpMatrix;
+    float *hwcImage;
+    size_t outBytes = 0;
+    virtual void init();
+    virtual void releaseResources();
+
+private:
+};
+
+class batchYoloPreprocess : public batchBasePreprocess
+{
+public:
+    batchYoloPreprocess();
+    ~batchYoloPreprocess();
+    void init() override;
+    // void run(BBox &bbox);
+protected:
+    void run(BatchBBox &batchbboxes);
+
+    private:
+};
 #endif

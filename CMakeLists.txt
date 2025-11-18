@@ -20,6 +20,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
 
 set(CMAKE_CUDA_STANDARD 14)
 enable_language(CUDA)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 # find_package(CUDA REQUIRED)
 find_package(OpenCV REQUIRED)
 
@@ -40,8 +41,9 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/external/spdlog)
 # 讓 spdlog 所有 target 支援 position-independent code（fPIC）
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-find_package(yaml-cpp REQUIRED PATHS)
-include_directories(${yaml-cpp_INCLUDE_DIRS})
+set(CMAKE_PREFIX_PATH "/usr/local/lib/cmake/yaml-cpp" CACHE PATH "Prefix path for packages")
+find_package(yaml-cpp REQUIRED)
+
 
 # 手動指定 TensorRT 與 CUDA 的位置
 set(CUDA_TOOLKIT_ROOT_DIR $ENV{CUDA_ROOT})
@@ -85,7 +87,7 @@ add_library(logger SHARED src/logger.cpp)
 target_link_libraries(logger PRIVATE spdlog::spdlog ${OpenCV_LIBS})
 
 add_library(yamlParser SHARED src/yamlParser.cpp)
-target_link_libraries(yamlParser PRIVATE spdlog::spdlog ${OpenCV_LIBS} yaml-cpp)
+target_link_libraries(yamlParser PRIVATE spdlog::spdlog ${OpenCV_LIBS} yaml-cpp::yaml-cpp)
 
 # 建立共享庫 imageProcess
 add_library(imageProcess SHARED src/imageProcess.cpp src/GPU_utils.cu src/GPUUtilsBatch.cu)
@@ -97,7 +99,7 @@ target_link_libraries(infer PRIVATE spdlog::spdlog ${OpenCV_LIBS} nvinfer nvonnx
 
 # 建立共享庫 GST
 add_library(gst SHARED src/gstGetimg.cpp)
-target_link_libraries(gst PRIVATE cudart ${OpenCV_LIBS} ${GST_LIBRARIES})
+target_link_libraries(gst PRIVATE cudart ${OpenCV_LIBS} ${GST_LIBRARIES} spdlog::spdlog)
 
 add_executable(${PROJECT_NAME} ${CMAKE_SOURCE_DIR}/src/main/main.cpp)
 
@@ -116,15 +118,18 @@ target_link_libraries(${PROJECT_NAME}
     setEnv
 )
 
-# add_executable(cudadtest cudatest.cpp)
+# add_executable(batchmain src/main/batchmain.cpp)
 
-# target_link_libraries(cudadtest
+# target_link_libraries(batchmain
 #     ${OpenCV_LIBS}
 #     cudart
 #     nvinfer
 #     nvonnxparser
 #     spdlog::spdlog
+#     yamlParser
 #     logger
 #     infer
 #     imageProcess
+#     CLI11::CLI11
+#     setEnv
 # )

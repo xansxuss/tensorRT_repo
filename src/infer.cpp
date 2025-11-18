@@ -12,7 +12,7 @@ inline void checkCuda(cudaError_t result, const char *msg = "CUDA Error")
     if (result != cudaSuccess)
     {
         customLogger::getInstance()->error("CUDA Error: {}", cudaGetErrorString(result));
-        throw std::runtime_error(std::string("[CUDA] ") + msg + ": " + cudaGetErrorString(result));
+        throw std::runtime_error(std::string(msg) + ": " + cudaGetErrorString(result));
     }
 }
 
@@ -64,7 +64,7 @@ public:
 private:
     void destroy()
     {
-        if (stream_ != nullptr)
+        if (stream_)
         {
             cudaStreamDestroy(stream_);
             stream_ = nullptr;
@@ -73,25 +73,25 @@ private:
     cudaStream_t stream_ = nullptr;
 };
 
-/// 基礎推論類別
 /// 建構子實做
-baseInfer::baseInfer(const std::string &enginePath)
+YoloInfer::YoloInfer(const std::string &enginePath)
 {
     // constructor
-    customLogger::getInstance()->debug("baseInfer constructor called with enginePath: {}", enginePath);
+    customLogger::getInstance()->debug("YoloInfer constructor called with enginePath: {}", enginePath);
     init(enginePath);
-    customLogger::getInstance()->debug("baseInfer constructor completed");
+    customLogger::getInstance()->debug("YoloInfer constructor completed");
+    mPreProcess = std::make_unique<yoloPreprocess>();
     mPreProcessGPU = std::make_unique<yoloPreprocessGPU>();
     mPostProcess = std::make_unique<yoloPostprocess>();
     mPostProcessGPU = std::make_unique<yoloPostprocessGPU>();
-    customLogger::getInstance()->debug("baseInfer initialized with preProcessGPU and postProcess");
+    customLogger::getInstance()->debug("YoloInfer initialized with preProcessGPU and postProcess");
 };
 
-baseInfer::~baseInfer() {
+YoloInfer::~YoloInfer() {
     // Deconstructor
 };
 
-void baseInfer::init(const std::string &enginePath)
+void YoloInfer::init(const std::string &enginePath)
 {
     mBindings.clear();
     std::vector<char> engineData;
@@ -110,7 +110,6 @@ void baseInfer::init(const std::string &enginePath)
         return;
     }
     mEngine.reset(mRuntime->deserializeCudaEngine(engineData.data(), engineData.size()));
-
     if (!mEngine)
     {
         throw std::runtime_error("deserializeCudaEngine failed");
@@ -127,10 +126,10 @@ void baseInfer::init(const std::string &enginePath)
     customLogger::getInstance()->debug("Engine loaded successfully");
     allocateBindings(mBindings); // batch_size = 1
     customLogger::getInstance()->debug("Bindings allocated successfully");
-    customLogger::getInstance()->debug("input N:{}", mBindings[0].N);
-    customLogger::getInstance()->debug("input C:{}", mBindings[0].C);
-    customLogger::getInstance()->debug("input H:{}", mBindings[0].H);
-    customLogger::getInstance()->debug("input W:{}", mBindings[0].W);
+    customLogger::getInstance()->debug("input Bindings N:{}", mBindings[0].N);
+    customLogger::getInstance()->debug("input Bindings C:{}", mBindings[0].C);
+    customLogger::getInstance()->debug("input Bindings H:{}", mBindings[0].H);
+    customLogger::getInstance()->debug("input Bindings W:{}", mBindings[0].W);
     customLogger::getInstance()->debug("input Bindings dims: {}", mBindings[0].dims);
     customLogger::getInstance()->debug("input Bindings name: {}", mBindings[0].name);
     customLogger::getInstance()->debug("input Bindings dtype: {}", mBindings[0].dtype);
@@ -144,7 +143,7 @@ void baseInfer::init(const std::string &enginePath)
     customLogger::getInstance()->debug("output Bindings dtype: {}", mBindings[1].dtype);
     customLogger::getInstance()->debug("output Bindings is_input: {}", mBindings[1].is_input);
 };
-void baseInfer::loadEngine(const std::string &enginePath, std::vector<char> &engineData)
+void YoloInfer::loadEngine(const std::string &enginePath, std::vector<char> &engineData)
 {
     // 讀取引擎檔案
     std::ifstream engineFile(enginePath, std::ios::binary | std::ios::ate);
@@ -166,7 +165,7 @@ void baseInfer::loadEngine(const std::string &enginePath, std::vector<char> &eng
     }
 }
 
-void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
+void YoloInfer::allocateBindings(std::vector<Binding> &mBindings)
 {
     int nbTensors = mEngine->getNbIOTensors();
     // std::cout << "Number of I/O tensors: " << nbTensors << std::endl;
@@ -221,9 +220,9 @@ void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
         mBindings.push_back(b);
     }
 };
-void baseInfer::baseInference(BBox &Bbox)
+void YoloInfer::YoloInference(BBox &Bbox)
 {
-    customLogger::getInstance()->debug("do baseInference");
+    customLogger::getInstance()->debug("do YoloInference");
     // customLogger::getInstance()->debug("input image size hight: {}, width: {}", Bbox.orinImage.rows, Bbox.orinImage.cols);
     Bbox.width = mBindings[0].W;
     Bbox.height = mBindings[0].H;
@@ -257,7 +256,7 @@ void baseInfer::baseInference(BBox &Bbox)
     // }
     yoloPostprocess yoloPostprocess;
     yoloPostprocess.run(Bbox);
-    customLogger::getInstance()->debug("do baseInference done");
+    customLogger::getInstance()->debug("do YoloInference done");
     for (int i = 0; i < Bbox.indices.size(); i++)
     {
         customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height);
@@ -267,18 +266,16 @@ void baseInfer::baseInference(BBox &Bbox)
     // cv::imwrite("result.jpg", Bbox.orinImage);
 };
 
-void baseInfer::baseInferenceGPU(BBox &Bbox)
+void YoloInfer::YoloInferenceGPU(BBox &Bbox)
 {
 
     CudaStream stream;
-    customLogger::getInstance()->debug("do baseInferenceGPU");
+    customLogger::getInstance()->debug("do YoloInferenceGPU");
     customLogger::getInstance()->debug("mBindings[0].w:{},mBindings[0].h:{}", mBindings[0].W, mBindings[0].H);
     Bbox.width = mBindings[0].W;
     Bbox.height = mBindings[0].H;
     Bbox.batch = mBindings[0].N;
     Bbox.channel = mBindings[0].C;
-
-    // auto pros = std::chrono::high_resolution_clock::now();
 
     mPreProcessGPU->run(Bbox);
 
@@ -350,15 +347,11 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
     // customLogger::getInstance()->info("post cost time : {}", postc.count());
     // customLogger::getInstance()->info("post FPS : {}", 1 / postc.count());
 
-    // // customLogger::getInstance()->debug("do baseInferenceGPU done");
+    // // customLogger::getInstance()->debug("do YoloInferenceGPU done");
 
     if (getImshowFlag("IMSHOW_FLAG"))
     {
         cv::Mat resultImage = Bbox.orinImage.clone();
-        // cv::Mat resizeImage;
-        // cv::Size newsize(static_cast<int>(Bbox.width - (Bbox.pad.left * 2)), static_cast<int>(Bbox.height - (Bbox.pad.top * 2)));
-        // customLogger::getInstance()->debug("newsize : {}\n", newsize);
-        // cv::resize(Bbox.orinImage, resizeImage, newsize);
         for (int i = 0; i < Bbox.indices.size(); i++)
         {
             customLogger::getInstance()->debug("Bbox.rect[{}] x: {}, y: {}, w: {}, h: {}, id: {}", i, Bbox.rect[i].x, Bbox.rect[i].y, Bbox.rect[i].width, Bbox.rect[i].height, Bbox.classId[i]);
@@ -371,24 +364,237 @@ void baseInfer::baseInferenceGPU(BBox &Bbox)
             box.width = std::clamp(static_cast<int>(std::round(Bbox.rect[i].width * resultImage.cols)), 0, resultImage.cols - box.x);
             box.height = std::clamp(static_cast<int>(std::round(Bbox.rect[i].height * resultImage.rows)), 0, resultImage.rows - box.y);
             customLogger::getInstance()->debug("box.rect x: {}, y: {}, w: {}, h: {}", box.x, box.y, box.width, box.height);
-            // cv::rectangle(resultImage, box, cv::Scalar(0, 0, 255), 2);
             cv::rectangle(resultImage, box, cv::Scalar(0, 0, 255), 2);
-            // cv::rectangle(resizeImage, cv::Rect(80,153,81,94), cv::Scalar(0, 0, 255), 2);
-            box.x = static_cast<int>(Bbox.rect[i].x * Bbox.resizeImage.cols);
-            box.y = static_cast<int>(Bbox.rect[i].y * Bbox.resizeImage.rows);
-            box.width = static_cast<int>(Bbox.rect[i].width * Bbox.resizeImage.cols);
-            box.height = static_cast<int>(Bbox.rect[i].height * Bbox.resizeImage.rows);
-            customLogger::getInstance()->debug("box.rect x: {}, y: {}, w: {}, h: {}", box.x, box.y, box.width, box.height);
-            cv::rectangle(Bbox.resizeImage, box, cv::Scalar(0, 0, 255), 2);
         }
-
         cv::namedWindow("Result Image", cv::WINDOW_NORMAL);
         cv::resizeWindow("Result Image", 640, 640);
         cv::imshow("Result Image", resultImage);
-        cv::namedWindow("Result resizeImage", cv::WINDOW_NORMAL);
-        cv::resizeWindow("Result resizeImage", 640, 640);
-        cv::imshow("Result resizeImage", Bbox.resizeImage);
     }
 }
 
-// baseInfer::baseInferenceGPUbatch()
+/// 基礎推論類別
+baseInfer::baseInfer(const std::string &enginePath) {
+    // customLogger::getInstance()->debug("baseInfer constructoer called with enginePath : {}", enginePath);
+    /// initialize example TensorRT engine
+    // init(enginePath);
+    // mPreprocessGPU = std::make_unique<yoloPreprocessGPU>();
+    // mPostprocessGPU = std::make_unique<yoloPostprocessGPU>();
+    // mPreprocess = std::make_unique<yoloPreprocess>();
+    // mPostprocess = std::make_unique<yoloPostprocess>();
+};
+
+baseInfer::~baseInfer()
+{
+    /// release resources TensorRT engine example
+    // customLogger::getInstance()->debug("baseInfer destructor called");
+    releasResources();
+    // // 釋放資源
+    // mRuntime.reset();
+    // mEngine.reset();
+    // mContext.reset();
+    // mIOMode.reset();
+    // mPreprocess.reset();
+    // mPreprocessGPU.reset();
+    // mPostprocess.reset();
+    // mPostprocessGPU.reset();
+}
+
+void baseInfer::init(const std::string &enginePath)
+{
+    mBindings.clear();
+    std::vector<char> engineData;
+    loadEngine(enginePath, engineData);
+    if (engineData.empty())
+    {
+        customLogger::getInstance()->critical("Failed to read engine file: {}", enginePath);
+        throw std::runtime_error("Failed to read engine file: " + enginePath);
+        return;
+    }
+    mRuntime.reset(nvinfer1::createInferRuntime(mLogger));
+    if (!mRuntime)
+    {
+        throw std::runtime_error("createInferRuntime failed");
+        customLogger::getInstance()->critical("createInferRuntime failed");
+        return;
+    }
+    mEngine.reset(mRuntime->deserializeCudaEngine(engineData.data(), engineData.size()));
+
+    if (!mEngine)
+    {
+        throw std::runtime_error("deserializeCudaEngine failed");
+        customLogger::getInstance()->critical("deserializeCudaEngine failed");
+        return;
+    }
+    mContext.reset(mEngine->createExecutionContext());
+    if (!mContext)
+    {
+        throw std::runtime_error("createExecutionContext failed");
+        customLogger::getInstance()->critical("createExecutionContext failed");
+        return;
+    }
+    customLogger::getInstance()->debug("Engine loaded successfully");
+    allocateBindings(mBindings); // batch_size = 1
+    customLogger::getInstance()->debug("Bindings allocated successfully");
+    customLogger::getInstance()->debug("input Bindings N:{}", mBindings[0].N);
+    customLogger::getInstance()->debug("input Bindings C:{}", mBindings[0].C);
+    customLogger::getInstance()->debug("input Bindings H:{}", mBindings[0].H);
+    customLogger::getInstance()->debug("input Bindings W:{}", mBindings[0].W);
+    customLogger::getInstance()->debug("input Bindings dims: {}", mBindings[0].dims);
+    customLogger::getInstance()->debug("input Bindings name: {}", mBindings[0].name);
+    customLogger::getInstance()->debug("input Bindings dtype: {}", mBindings[0].dtype);
+    customLogger::getInstance()->debug("input Bindings is_input: {}", mBindings[0].is_input);
+    customLogger::getInstance()->debug("output Bindings N: {}", mBindings[1].N);
+    customLogger::getInstance()->debug("output Bindings C: {}", mBindings[1].C);
+    customLogger::getInstance()->debug("output Bindings H: {}", mBindings[1].H);
+    customLogger::getInstance()->debug("output Bindings W: {}", mBindings[1].W);
+    customLogger::getInstance()->debug("output Bindings dims: {}", mBindings[1].dims);
+    customLogger::getInstance()->debug("output Bindings name: {}", mBindings[1].name);
+    customLogger::getInstance()->debug("output Bindings dtype: {}", mBindings[1].dtype);
+    customLogger::getInstance()->debug("output Bindings is_input: {}", mBindings[1].is_input);
+}
+
+void baseInfer::releasResources()
+{
+    // customLogger::getInstance()->debug("Releasing resources");
+    for (auto &binding : mBindings)
+    {
+        if (binding.device_ptr)
+        {
+            cudaFree(binding.device_ptr);
+            binding.device_ptr = nullptr;
+        }
+        if (binding.host_ptr)
+        {
+            cudaFreeHost(binding.host_ptr);
+            binding.host_ptr = nullptr;
+        }
+    }
+    // customLogger::getInstance()->debug("Resources released successfully");
+}
+
+void baseInfer::loadEngine(const std::string &enginePath, std::vector<char> &engineData)
+{
+    // 讀取引擎檔案
+    std::ifstream engineFile(enginePath, std::ios::binary | std::ios::ate);
+    if (!engineFile)
+    {
+        customLogger::getInstance()->critical("Failed to open engine file: {}", enginePath);
+        throw std::runtime_error("Failed to open engine file: " + enginePath);
+        return;
+    }
+    std::streamsize size = engineFile.tellg();
+    engineFile.seekg(0, std::ios::beg);
+    engineData.resize(size);
+    engineFile.read(engineData.data(), size);
+    if (!engineFile)
+    {
+        customLogger::getInstance()->critical("Failed to read engine file: {}", enginePath);
+        throw std::runtime_error("Failed to open engine file: " + enginePath);
+        return;
+    }
+}
+
+void baseInfer::allocateBindings(std::vector<Binding> &mBindings)
+{
+    int nbTensors = mEngine->getNbIOTensors();
+    for (size_t i = 0; i < nbTensors; ++i)
+    {
+        Binding b;
+        b.name = mEngine->getIOTensorName(i);
+        b.is_input = (mEngine->getTensorIOMode(b.name.c_str()) == nvinfer1::TensorIOMode::kINPUT);
+        b.dtype = mEngine->getTensorDataType(b.name.c_str());
+        b.dims = mEngine->getTensorShape(b.name.c_str());
+        b.N = b.dims.d[0];
+        b.C = b.dims.d[1];
+        b.H = b.dims.d[2];
+        b.W = b.dims.d[3];
+        size_t elemsize = 1;
+
+        // 計算大小
+        b.size = volume(b.dims) * dataTypeSize(b.dtype) * b.N;
+        cudaMalloc(&b.device_ptr, b.size);   // 分配 GPU 記憶體
+        cudaMallocHost(&b.host_ptr, b.size); // 分配 Host 記憶體
+        mBindings.push_back(b);
+        customLogger::getInstance()->debug("Binding {}: name={}, is_input={}, dtype={}, dims={}, size={}",
+                                           i, b.name, b.is_input, dataTypeToStr(b.dtype),
+                                           b.dims, b.size);
+    }
+}
+
+// volume 與 dataTypeSize 自行實作
+size_t baseInfer::volume(const nvinfer1::Dims &d)
+{
+    size_t v = 1;
+    for (int i = 0; i < d.nbDims; i++)
+        v *= d.d[i];
+    return v;
+}
+
+size_t baseInfer::dataTypeSize(nvinfer1::DataType t)
+{
+    switch (t)
+    {
+    case nvinfer1::DataType::kFLOAT:
+        return 4;
+    case nvinfer1::DataType::kHALF:
+        return 2;
+    case nvinfer1::DataType::kINT4:
+        return 1;
+    case nvinfer1::DataType::kINT8:
+        return 1;
+    case nvinfer1::DataType::kINT32:
+        return 4;
+    case nvinfer1::DataType::kINT64:
+        return 8;
+    case nvinfer1::DataType::kBOOL:
+        return 1;
+    case nvinfer1::DataType::kUINT8:
+        return 1;
+    case nvinfer1::DataType::kFP8:
+        return 1;
+    case nvinfer1::DataType::kBF16:
+        return 2;
+
+    default:
+        return 0;
+    }
+}
+
+void baseInfer::baseInference(BBox &Bbox)
+{
+    // customLogger::getInstance()->debug("baseInference called");
+    // 這裡可以實作基礎推論邏輯
+    // 例如：將 BBox 的資料轉換為 TensorRT 所需的格式，然後執行推論
+    // customLogger::getInstance()->debug("baseInference completed");
+    // 注意：這裡的實作是空的，實際應用中需要根據具體需求來實現推論邏輯
+}
+
+void baseInfer::baseInferenceGPU(BBox &Bbox)
+{
+    // customLogger::getInstance()->debug("baseInferenceGPU called");
+    // 這裡可以實作基礎 GPU 推論邏輯
+    // 例如：將 BBox 的資料轉換為 TensorRT 所需的格式，然後執行 GPU 推論
+    // customLogger::getInstance()->debug("baseInferenceGPU completed");
+    // 注意：這裡的實作是空的，實際應用中需要根據具體需求來實現推論邏輯
+}
+
+/// 建構子實做 (繼承 baseInfer)
+batchYoloInfer::batchYoloInfer(const std::string &enginePath) : baseInfer(enginePath) // 呼叫 baseInfer 的建構子
+{
+    customLogger::getInstance()->debug("YoloInfer constructor called with enginePath: {}", enginePath);
+    init(enginePath);
+}
+
+batchYoloInfer::~batchYoloInfer()
+{
+    customLogger::getInstance()->debug("YoloInfer destructor called");
+    // 釋放資源
+    baseInfer::releasResources();
+}
+
+void batchYoloInfer::init(const std::string &enginePath)
+{
+    customLogger::getInstance()->debug("batchYoloInfer initialize resource");
+    baseInfer::init(enginePath);
+    mPreprocess = std::make_unique<batchYoloPreprocess>();
+}

@@ -13,7 +13,41 @@
 #include <fstream>
 #include <iomanip>
 
-infoModel infomodel;
+size_t getElementType(nvinfer1::DataType type)
+{
+    switch (type)
+    {
+    case nvinfer1::DataType::kFLOAT:
+        return 4; // 4 bytes for float
+    case nvinfer1::DataType::kHALF:
+        return 2; // 2 bytes for half
+    case nvinfer1::DataType::kINT8:
+        return 1; // 1 byte for int8
+    case nvinfer1::DataType::kINT32:
+        return 4; // 4 bytes for int32
+    case nvinfer1::DataType::kUINT8:
+        return 1; // 1 byte for uint8
+#if NV_TENSORRT_MAJOR >= 7
+    case nvinfer1::DataType::kINT64:
+        return 8; // 8 bytes for int64
+    case nvinfer1::DataType::kINT4:
+        return 1; // 1 byte for int4 (4 bits)
+#endif
+#if NV_TENSORRT_MAJOR >= 8
+    case nvinfer1::DataType::kBOOL:
+        return 1; // 1 byte for bool
+#endif
+#if NV_TENSORRT_MAJOR >= 9
+    case nvinfer1::DataType::kFP8:
+        return 1; // 1 byte for FP8
+    case nvinfer1::DataType::kBF16:
+        return 2; // 2 bytes for BF16
+#endif
+    default:
+        customLogger::getInstance()->error("Unsupported data type: {}", static_cast<int>(type));
+        throw std::runtime_error("Unsupported data type");
+    }
+}
 
 /**
  * @brief Preprocess the input image for YOLO model inference
@@ -146,7 +180,9 @@ void yoloPreprocessGPU::run(BBox &bbox)
     // customLogger::getInstance()->debug("originalWidth: {}, originalHeight: {}", bbox.orinImage.cols, bbox.orinImage.rows);
     // cv::imwrite("oringImage.jpg", bbox.orinImage);
     // cv::imwrite("resizeImage.jpg", bbox.resizeImage);
+
     bbox.gpuInputImage.upload(bbox.orinImage);
+
     // cv::Mat cpuMat;
     // gpuInputImage.download(cpuMat);
     // cv::namedWindow("GPU Decoded Frame", cv::WINDOW_NORMAL);
@@ -154,7 +190,9 @@ void yoloPreprocessGPU::run(BBox &bbox)
     // customLogger::getInstance()->debug("GPUtoCPUWidth: {}, GPUtoCPUHeight: {}", cpuMat.cols, cpuMat.rows);
     // // cv::imwrite("oringImage2.jpg", cpuMat);
     // auto letters = std::chrono::high_resolution_clock::now();
+
     letterBoxGPU(bbox);
+
     // auto lettere = std::chrono::high_resolution_clock::now();
     // std::chrono::duration<double> letterc = lettere - letters;
     // customLogger::getInstance()->info("letter cost time : {}", letterc.count());
@@ -216,7 +254,9 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     cudaMemset(hwcImage, 0, outBytes);
     assert(hwcImage != nullptr);
     // 2. 傳入正確大小給 grid
-    dim3 block(32, 32);
+    // dim3 block(32, 32);
+    // dim3 block(32, 8);
+    dim3 block(16, 16);
     dim3 grid((outW + block.x - 1) / block.x, (outH + block.y - 1) / block.y);
 
     // 3. 處理 warpMatrix 複製
@@ -237,7 +277,7 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
     // customLogger::getInstance()->debug("static_cast<int>(inputImage.step):{}", static_cast<int>(inputImage.step));
     // customLogger::getInstance()->debug("inputImage.elemSize():{}", inputImage.elemSize());
     // // 5. 直接下載到 CPU
-    // customLogger::getInstance()->debug("pointer GPU to CPU");
+    customLogger::getInstance()->debug("pointer GPU to CPU");
     std::vector<float> cpuBuffer(outW * outH * 3);
     cudaMemcpy(cpuBuffer.data(), hwcImage, outBytes, cudaMemcpyDeviceToHost);
 
@@ -286,10 +326,10 @@ void yoloPreprocessGPU::letterBoxGPU(BBox &bbox)
         cv::Mat hwcwarpImageINT;
         hwcwarpImage.convertTo(hwcwarpImageINT, CV_8UC3, 255.0);
         // hwcwarpImageINT.copyTo(outputImage);
-        cv::cvtColor(hwcwarpImageINT, hwcwarpImageINT, cv::COLOR_RGB2BGR);
-        cv::namedWindow("hwcwarpImageINT", cv::WINDOW_NORMAL);
-        cv::resizeWindow("hwcwarpImageINT", 640, 640);
-        cv::imshow("hwcwarpImageINT", hwcwarpImageINT);
+        // cv::cvtColor(hwcwarpImageINT, hwcwarpImageINT, cv::COLOR_RGB2BGR);
+        // cv::namedWindow("hwcwarpImageINT", cv::WINDOW_NORMAL);
+        // cv::resizeWindow("hwcwarpImageINT", 640, 640);
+        // cv::imshow("hwcwarpImageINT", hwcwarpImageINT);
         hwcwarpImageINT.copyTo(bbox.resizeImage);
         // cv::imwrite("cuda_process_chw2hwc_debug.jpg", outputImage);
     }
@@ -583,21 +623,18 @@ yoloPostprocessGPU::yoloPostprocessGPU()
     if (err != cudaSuccess)
     {
         std::cerr << "cudaMalloc failed: " << cudaGetErrorString(err) << std::endl;
-        customLogger::getInstance()->error("cudaMalloc failed: {}", cudaGetErrorString(err));
     }
     cudaMalloc(&d_warpMatrix, 6 * sizeof(float));
-    // else
-    // {
-    //     std::cout << "[Constructor] d_boxes allocated at: " << d_boxes << std::endl;
-    // }
+    host_boxes = new Box[mBindings[1].H];
 }
 yoloPostprocessGPU::~yoloPostprocessGPU()
 {
     // Destructor
     cudaFree(d_boxes);
     cudaFree(d_warpMatrix);
-    free(host_boxes);
+    delete[] host_boxes;
 }
+
 void yoloPostprocessGPU::run(BBox &bbox)
 {
     // Implementation
@@ -615,13 +652,20 @@ void yoloPostprocessGPU::run(BBox &bbox)
     // float matrix_inv[6] = {0};
     // memcpy(matrix_inv, bbox.pad.warpMatrix_inv, 6 * sizeof(float));
 
-    customLogger::getInstance()->debug("host process bbox.pad.warpMatrix_inv: {},{},{},{},{},{}", bbox.pad.warpMatrix[0], bbox.pad.warpMatrix[1], bbox.pad.warpMatrix[2],
-                                       bbox.pad.warpMatrix[3], bbox.pad.warpMatrix[4], bbox.pad.warpMatrix[5]);
+    // customLogger::getInstance()->debug("cuda process bbox.pad.warpMatrix_inv: {},{},{},{},{},{}", bbox.pad.warpMatrix_inv[0], bbox.pad.warpMatrix_inv[1], bbox.pad.warpMatrix_inv[2],
+    //                                    bbox.pad.warpMatrix_inv[3], bbox.pad.warpMatrix_inv[4], bbox.pad.warpMatrix_inv[5]);
 
-    // customLogger::getInstance()->debug("host process Matrix_inv: {},{},{},{},{},{}", matrix_inv[0], matrix_inv[1], matrix_inv[2],
+    // customLogger::getInstance()->debug("cuda process Matrix_inv: {},{},{},{},{},{}", matrix_inv[0], matrix_inv[1], matrix_inv[2],
     //                                    matrix_inv[3], matrix_inv[4], matrix_inv[5]);
 
+    // customLogger::getInstance()->debug("copy cpu to gpu");
     cudaMemcpy(d_warpMatrix, bbox.pad.warpMatrix, 6 * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaError_t err = cudaMemcpy(d_warpMatrix, bbox.pad.warpMatrix_inv, sizeof(float) * 6, cudaMemcpyHostToDevice);
+    // if (err != cudaSuccess)
+    // {
+    //     printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
+    //     // 處理錯誤或return
+    // }
 
     // float *outputDataGPU = (float *)malloc(mBindings[1].H * mBindings[1].C * sizeof(float));
     // cudaMemcpy(outputDataGPU, reinterpret_cast<float *>(mBindings[1].device_ptr), mBindings[1].H * mBindings[1].C * sizeof(float), cudaMemcpyDeviceToHost);
@@ -655,9 +699,10 @@ void yoloPostprocessGPU::run(BBox &bbox)
     launchInverse(d_boxes, mBindings[1].H, d_warpMatrix, bbox.pad.ratio, bbox.width, bbox.height, bbox.orinImage.cols, bbox.orinImage.rows);
 
     // debug decodeboxes
-    host_boxes = new Box[mBindings[1].H];
+
     memset(host_boxes, 0, sizeof(Box) * mBindings[1].H);
     cudaMemcpy(host_boxes, d_boxes, sizeof(Box) * mBindings[1].H, cudaMemcpyDeviceToHost);
+
     // std::string GPUoutFile = "yoloPostprocessGPU_output.txt";
     // std::ofstream outFile(GPUoutFile);
     // if (!outFile.is_open())
@@ -706,6 +751,88 @@ void yoloPostprocessGPU::run(BBox &bbox)
     customLogger::getInstance()->debug("bbox.pad.top): {}", bbox.pad.top);
     customLogger::getInstance()->debug("bbox.pad.right): {}", bbox.pad.right);
     customLogger::getInstance()->debug("bbox.pad.bottom): {}", bbox.pad.bottom);
+}
 
-    
+batchBasePreprocess::batchBasePreprocess()
+{
+    // Constructor
+}
+
+batchBasePreprocess::~batchBasePreprocess()
+{
+    // Destructor
+}
+
+void batchBasePreprocess::init()
+{
+    // customLogger::getInstance()->debug("run init resources");
+    releaseResources(); // 確保釋放之前舊有資源
+    customLogger::getInstance()->debug("dtype : {}, type size : {}", mBindings[0].dtype, getElementType(mBindings[0].dtype));
+    // 1. 計算輸出大小
+    outBytes = static_cast<int>(mBindings[0].N * mBindings[0].W * mBindings[0].H * mBindings[0].C * getElementType(mBindings[0].dtype));
+    customLogger::getInstance()->debug("outBytes: {}", outBytes);
+    cudaError_t cudaStatus = cudaMalloc(&outputImagePtr, outBytes);
+    if (cudaStatus != cudaSuccess)
+    {
+        customLogger::getInstance()->error("cudaMalloc failed for outputImagePtr");
+        throw std::runtime_error("cudaMalloc failed for outputImagePtr");
+    }
+    cudaStatus = cudaMalloc(&d_warpMatrix, sizeof(float) * 6);
+    if (cudaStatus != cudaSuccess)
+    {
+        customLogger::getInstance()->error("cudaMalloc failed for d_warpMatrix");
+        throw std::runtime_error("cudaMalloc failed for d_warpMatrix");
+    }
+    cudaStatus = cudaMalloc(&inputImagePtr, outBytes);
+    if (cudaStatus != cudaSuccess)
+    {
+        customLogger::getInstance()->error("cudaMalloc failed for inputImagePtr");
+        throw std::runtime_error("cudaMalloc failed for inputImagePtr");
+    }
+}
+
+void batchBasePreprocess::releaseResources()
+{
+    // customLogger::getInstance()->debug("run release resources");
+    if (outputImagePtr)
+    {
+        cudaFree(outputImagePtr);
+        outputImagePtr = nullptr;
+    }
+    if (d_warpMatrix)
+    {
+        cudaFree(d_warpMatrix);
+        d_warpMatrix = nullptr;
+    }
+}
+
+batchYoloPreprocess::batchYoloPreprocess()
+{
+    // Constructor
+    customLogger::getInstance()->debug("run batchYoloPreprocess constructor");
+    init();
+}
+
+batchYoloPreprocess::~batchYoloPreprocess()
+{
+    // Destructor
+    customLogger::getInstance()->debug("run batchYoloPreprocess destructor");
+    batchBasePreprocess::releaseResources();
+}
+
+void batchYoloPreprocess::init()
+{
+    // Constructor with bbox
+    customLogger::getInstance()->debug("run batchYoloPreprocess constructor with bbox");
+    batchBasePreprocess::init();
+}
+
+void batchYoloPreprocess::run(BatchBBox &batchbboxes)
+{
+    customLogger::getInstance()->debug("run batchYoloPreprocess run");
+    // size_t singleImageBytes = mBindings[0].W * mBindings[0].H * mBindings[0].C * sizeof(float);
+    // for (size_t i = 0; i < batchbboxes.gpuImage.size(); ++i)
+    // {
+    //     cudaMemcpy(inputImagePtr + i * singleImageBytes, batchbboxes.gpuImage[i].data, singleImageBytes, cudaMemcpyDeviceToDevice);
+    // }
 }

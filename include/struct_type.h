@@ -69,9 +69,8 @@ struct Inferresult
 {
     std::vector<cv::Rect> rects;
     std::vector<float> scores;
-    std::vector<int>classes;
+    std::vector<int> classes;
 };
-
 
 struct BBox
 {
@@ -91,20 +90,32 @@ struct BBox
 };
 extern std::vector<BBox> Bboxes;
 
-struct BBoxBatch
+struct BatchBBox
 {
-    std::vector<cv::Mat> orinImage;
-    std::vector<cv::Mat> resizeImage;
-    std::vector<cv::cuda::GpuMat> gpuImage;
+    // std::vector<cv::Mat> orinImage;
+    // std::vector<cv::Mat> resizeImage;
+    // std::vector<cv::cuda::GpuMat> gpuImage;
+    // int batch;
+    // int width;
+    // int height;
+    // int channel;
+    // std::vector<cv::Rect_<float>> rect;
+    // std::vector<int> indices;
+    // std::vector<int> classId;
+    // std::vector<float> score;
+    float *inputImagePtr;
+    float *outputImagePtr;
     int batch;
     int width;
     int height;
     int channel;
+    float rect;
+    float classId;
+    float score;
     Pad pad;
     yolocfg cfg;
-    Inferresult inferresult; 
 };
-extern std::vector<BBoxBatch> BBoxBatches;
+extern std::vector<BatchBBox> BatchBBoxes;
 
 struct caltime
 {

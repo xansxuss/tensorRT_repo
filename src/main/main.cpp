@@ -27,16 +27,13 @@
 using namespace nvinfer1;
 // const std::string engineFile = "/home/eray/repo/NVIDIA/TensorRT/infer/model/yolov8n.engine";
 std::vector<BBox> Bboxes;
-std::vector<BBoxBatch> BBoxBatches;
 std::vector<Binding> mBindings;
 configStruct configstruct;
 std::condition_variable cvFrameavailable;
 std::mutex mtxFrame;
 BBox bbox;
-BBoxBatch BboxBatch;
 
 std::vector<float> costtimes;
-
 std::deque<BBox> BboxesDeque;
 std::deque<BBox> inferDeque;
 
@@ -98,7 +95,7 @@ std::deque<BBox> inferDeque;
 //     customLogger::getInstance()->debug("Starting to show frames from deque...");
 //     int count = 0;
 //     BBox bbox;
-//     baseInfer infer(configstruct.enginePath);
+//     YoloInfer infer(configstruct.enginePath);
 //     while (true)
 //     {
 //         std::unique_lock<std::mutex> lock(mtxFrame); // ✅ 用 unique_lock
@@ -115,7 +112,7 @@ std::deque<BBox> inferDeque;
 //         inferDeque.emplace_back(bbox);
 //         inferDeque.pop_front();
 //         lock.unlock();
-//         infer.baseInferenceGPU(bbox);
+//         infer.YoloInferenceGPU(bbox);
 //         cv::Mat frame = bbox.orinImage;
 //         // cv::imshow("GPU Decoded Frame", frame);
 //         // std::ostringstream oss;
@@ -158,7 +155,17 @@ int main(int argc, char **argv)
     yamlparser.parseConfig(configPath, bbox, configstruct);
 
     customLogger->debug("Starting the application...");
-    cv::Mat image = cv::imread(configstruct.imagePath);
+    cv::Mat image = cv::imread(configstruct.imagePath,cv::IMREAD_COLOR);
+    if (image.empty())
+    {
+        customLogger->critical("Error: Could not load image from path: {}", configstruct.imagePath);
+        return -1;
+    }
+
+    //確保影像是連續處存在記憶體中，以符合 CUDA 上傳要求
+    if (!image.isContinuous())
+    {image = image.clone();}
+
 
     // cv::Mat image = cv::imread("/home/eray/repo/datasets/coco/000000005060.jpg");
     // std::thread rtspThread(getRTSPframe);
@@ -187,60 +194,50 @@ int main(int argc, char **argv)
     //     cv::Mat frame;
     // BBox bbox;
 
+    customLogger->info("Image loaded from size: {}x{},pitch:{}", image.cols, image.rows, image.step);
+    customLogger->info("Channels: {},ElemSize: {}", image.channels(), image.elemSize());
     customLogger->debug("Starting base inference...");
-    baseInfer infer(configstruct.enginePath);
+    YoloInfer infer(configstruct.enginePath);
+
     customLogger->debug("Base inference initialized with engine file: {}", configstruct.enginePath);
     int processcount = 0;
-    // while (cap.read(frame))
-    // {
-    //     if (frame.empty())
-    //     {
-    //         customLogger::getInstance()->error("Received empty frame from video stream, exiting...");
-    //         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    //     }
 
-    //     bbox.orinImage = frame;
-    //     // BboxesDeque.emplace_back(bbox);
-    //     // customLogger::getInstance()->debug("Read frame from video stream, size: {}", BboxesDeque.size());
-    //     infer.baseInferenceGPU(bbox);
-    //     // customLogger::getInstance()->debug("Read frame from video stream, size: {}x{}", frame.cols, frame.rows);
-    //     // BboxesDeque.pop_front();
-
-    //     // if (cv::waitKey(1) == 27)
-    //     //     break;
-    // }
     cv::Mat frame;
-    // bbox.orinImage = image;
-    // infer.baseInferenceGPU(bbox);
 
     while (true)
     {
         // customLogger->info("Process count: {}", processcount);
         bbox.orinImage = image;
         auto start = std::chrono::high_resolution_clock::now();
-        infer.baseInferenceGPU(bbox);
+        infer.YoloInferenceGPU(bbox);
+        // infer->YoloInferenceGPU(bbox);
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> costtime = end - start;
         // customLogger->info("cost:{}",costtime.count());
         costtimes.push_back(costtime.count());
-        if (processcount % 60 == 0)
+        if (processcount % 10000 == 0)
         {
             float sum = std::accumulate(costtimes.begin(), costtimes.end(), 0.0);
             int count = costtimes.size();
             float average = sum / count;
-            customLogger->info("average : {}", average);
+            customLogger->info("average : {} S", average);
             // customLogger->info("count : {}", count);
-            customLogger->info("cost time : {}", average);
+            customLogger->info("cost time : {} S", average);
             customLogger->info("FPS : {}", 1 / average);
         }
-        if (getImshowFlag("IMSHOW_FLAG"))
+        if (processcount == INT_MAX)
         {
-            // customLogger->info("getImshowFlag:{}",getImshowFlag("IMSHOW_FLAG"));
-            frame = bbox.orinImage;
-            cv::namedWindow("GPU Decoded Frame", cv::WINDOW_NORMAL);
-            cv::resizeWindow("GPU Decoded Frame", 640, 640);
-            cv::imshow("GPU Decoded Frame", bbox.orinImage);
+            processcount = 0;
+            costtimes.clear();
         }
+        // if (getImshowFlag("IMSHOW_FLAG"))
+        // {
+        //     // customLogger->info("getImshowFlag:{}",getImshowFlag("IMSHOW_FLAG"));
+        //     frame = bbox.orinImage;
+        //     cv::namedWindow("GPU Decoded Frame", cv::WINDOW_NORMAL);
+        //     cv::resizeWindow("GPU Decoded Frame", 640, 640);
+        //     cv::imshow("GPU Decoded Frame", bbox.orinImage);
+        // }
 
         bbox.orinImage.release();
         bbox.resizeImage.release();

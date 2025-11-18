@@ -1,8 +1,11 @@
 .vscode
 build
-# bin
+bin
 tensorrt_infer
 logs
 cudatest.cpp
 mainDirty.cpp
 lib
+model
+testBuild
+yolov8n_bs01.engine

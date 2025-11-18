@@ -1,0 +1,3 @@
+[submodule "external/spdlog"]
+	path = external/spdlog
+	url = git@github.com:xansxuss/spdlog.git
